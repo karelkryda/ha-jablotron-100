@@ -1,0 +1,12 @@
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+norecursedirs = [".git", ".venv", "config"]
+
+[tool.pyright]
+# Home Assistant's ConfigFlowResult / FlowResult TypedDicts mark fields as
+# NotRequired because different result shapes populate different fields.
+# In practice HA always sets `type`, `step_id`, `errors`, etc. for the
+# corresponding result. This mirrors HA core's own convention of accessing
+# these fields directly. Test coverage exercises the guarantee at runtime.
+reportTypedDictNotRequiredAccess = "none"

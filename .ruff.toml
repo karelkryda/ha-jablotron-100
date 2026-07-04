@@ -1,0 +1,40 @@
+# The contents of this file is based on https://github.com/home-assistant/core/blob/dev/pyproject.toml
+
+required-version = ">=0.15.14"
+target-version = "py314"
+
+[lint]
+select = [
+    "ALL",
+]
+
+ignore = [
+    "ANN401", # Dynamically typed expressions (typing.Any) are disallowed
+    "D203",   # no-blank-line-before-class (incompatible with formatter)
+    "D212",   # multi-line-summary-first-line (incompatible with formatter)
+    "COM812", # incompatible with formatter
+    "ISC001", # incompatible with formatter
+]
+
+[lint.per-file-ignores]
+"tests/**" = [
+    "S101",    # assert is expected in pytest
+    "SLF001",  # private member access is fine in white-box tests
+    "PLR2004", # magic values are fine in test data
+    "TC001",   # pytest reads annotations at runtime for fixture injection
+    "TC002",
+    "TC003",
+    "ANN201",  # test functions don't need return type annotations
+    "D101",    # test classes don't need class docstrings
+    "D102",    # test methods don't need method docstrings
+    "D103",    # test module docstring is optional
+    "D205",    # docstring summary blank line not needed in tests
+    "D400",    # docstring period not required in tests
+    "D415",    # docstring punctuation not required in tests
+]
+
+[lint.flake8-pytest-style]
+fixture-parentheses = false
+
+[lint.mccabe]
+max-complexity = 25

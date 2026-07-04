@@ -1,0 +1,49 @@
+{
+  "config": {
+    "flow_title": "{name}",
+    "step": {
+      "user": {
+        "title": "Select Jablotron panel",
+        "description": "Multiple Jablotron panels were found. Select the one to configure.",
+        "data": {
+          "device_path": "Panel"
+        }
+      },
+      "confirm": {
+        "title": "Confirm Jablotron panel",
+        "description": "**Panel:** {name}\n**Device:** `{path}`\n**Serial:** `{serial}`\n\nHome Assistant will briefly open the device to verify permissions and exclusive access. Make sure JA-Link / F-Link is closed before continuing."
+      },
+      "reconfigure": {
+        "title": "Reconfigure Jablotron panel",
+        "description": "Select the panel this integration should control.",
+        "data": {
+          "device_path": "Panel"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "This panel is already configured.",
+      "no_device": "No Jablotron panel found on USB. Make sure the panel is connected and JA-Link / F-Link is closed.",
+      "single_instance_allowed": "Only a single Jablotron Local instance is supported.",
+      "reconfigure_successful": "Panel reconfigured successfully.",
+      "unique_id_mismatch": "The selected panel does not match the configured one (different serial number)."
+    },
+    "error": {
+      "cannot_connect": "Unable to communicate with the panel. Check the connection and the Home Assistant logs.",
+      "device_not_found": "The panel device disappeared before setup could complete. Reconnect the cable and try again.",
+      "permission_denied": "Home Assistant cannot access the panel device. Verify that the process has read/write permission on the hidraw character device.",
+      "device_busy": "The panel is held by another process (typically JA-Link or F-Link). Close it and try again."
+    }
+  },
+  "exceptions": {
+    "code_required": {
+      "message": "A code is required to arm or disarm the alarm."
+    },
+    "wrong_code": {
+      "message": "The panel rejected the code. Verify your PIN is correct."
+    },
+    "command_failed": {
+      "message": "The command failed. The panel did not respond in time."
+    }
+  }
+}

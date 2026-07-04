@@ -1,0 +1,8 @@
+# Home Assistant dev configuration for jablotron_local
+
+default_config:
+
+logger:
+  default: info
+  logs:
+    custom_components.jablotron_local: debug

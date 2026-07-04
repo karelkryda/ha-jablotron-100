@@ -1,0 +1,20 @@
+{
+  "domain": "jablotron_local",
+  "name": "Jablotron Local",
+  "codeowners": ["@karelkryda"],
+  "config_flow": true,
+  "documentation": "https://github.com/karelkryda/ha-jablotron-100",
+  "integration_type": "device",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/karelkryda/ha-jablotron-100/issues",
+  "loggers": ["custom_components.jablotron_local"],
+  "requirements": [],
+  "single_config_entry": true,
+  "usb": [
+    {
+      "vid": "16D6",
+      "pid": "0008"
+    }
+  ],
+  "version": "1.0.0"
+}
