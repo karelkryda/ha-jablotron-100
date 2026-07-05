@@ -208,13 +208,15 @@ class JablotronCoordinator(DataUpdateCoordinator[PanelState]):
                 and status.reason == UiStatusReason.WRONG_CODE
                 and not self.client.user_initiated_action
             ):
-                # This should never happen during monitoring.
-                # If it does, something is catastrophically wrong.
-                LOGGER.critical(
-                    "Panel reported WRONG_CODE during unauthenticated "
-                    "monitoring. This must never occur - the reader "
-                    "thread never sends a PIN"
+                # WRONG_CODE without user action means the configured
+                # service PIN is invalid or the integration sent a PIN
+                # it shouldn't have. Stop and force reauth.
+                LOGGER.error(
+                    "Panel reported WRONG_CODE without user action; "
+                    "forcing reauthentication"
                 )
+                if self.config_entry:
+                    self.config_entry.async_start_reauth(self.hass)
 
     def _process_connection_change(self, connected: bool) -> None:  # noqa: FBT001
         """Update connection state and notify entities."""

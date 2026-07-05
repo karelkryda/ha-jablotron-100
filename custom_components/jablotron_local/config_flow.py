@@ -54,6 +54,34 @@ class JablotronLocalConfigFlow(ConfigFlow, domain=DOMAIN):
         """Initialize the config flow."""
         self._discovered_panel: DiscoveredPanel | None = None
 
+    async def async_step_reauth(self, _entry_data: dict[str, Any]) -> ConfigFlowResult:
+        """Handle reauthentication triggered by invalid service PIN."""
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Prompt user to re-enter service PIN."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            service_pin = user_input.get(CONF_SERVICE_PIN, "").strip()
+            return self.async_update_reload_and_abort(
+                self._get_reauth_entry(),
+                data_updates={
+                    CONF_SERVICE_PIN: service_pin or None,
+                },
+            )
+
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(CONF_SERVICE_PIN, default=""): str,
+                }
+            ),
+            errors=errors,
+        )
+
     async def async_step_usb(self, discovery_info: UsbServiceInfo) -> ConfigFlowResult:
         """
         Handle a panel discovered by Home Assistant's USB integration.

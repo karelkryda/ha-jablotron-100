@@ -2,6 +2,13 @@
   "config": {
     "flow_title": "{name}",
     "step": {
+      "reauth_confirm": {
+        "title": "Reauthenticate Jablotron panel",
+        "description": "The configured service PIN was rejected by the panel. Enter a valid service PIN or leave empty to disable config reading.",
+        "data": {
+          "service_pin": "Service PIN"
+        }
+      },
       "user": {
         "title": "Select Jablotron panel",
         "description": "Multiple Jablotron panels were found. Select the one to configure.",

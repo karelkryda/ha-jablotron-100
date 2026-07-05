@@ -262,10 +262,10 @@ class TestWrongCodeHandling:
         coordinator = _make_coordinator(hass)
         coordinator.client.user_initiated_action = False
 
-        with caplog.at_level(logging.CRITICAL):
+        with caplog.at_level(logging.ERROR):
             coordinator._process_packets([_wrong_code_packet()])
 
-        assert "WRONG_CODE" in caplog.text
+        assert "WRONG_CODE" in caplog.text or "reauthentication" in caplog.text
 
     async def test_non_wrong_code_status_does_not_log_critical(
         self, hass: HomeAssistant, caplog: pytest.LogCaptureFixture
