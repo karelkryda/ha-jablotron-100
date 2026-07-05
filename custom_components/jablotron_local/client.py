@@ -161,7 +161,7 @@ class JablotronClient:
         default_factory=threading.Event, init=False, repr=False
     )
     _cmd_auth_error: bool = field(default=False, init=False, repr=False)
-    command_in_progress: bool = field(default=False, init=False, repr=False)
+    user_initiated_action: bool = field(default=False, init=False, repr=False)
     _cmd_export_done_event: threading.Event = field(
         default_factory=threading.Event, init=False, repr=False
     )
@@ -409,7 +409,7 @@ class JablotronClient:
         with self._session_lock:
             try:
                 # 1. Clear stale session.
-                self.command_in_progress = True
+                self.user_initiated_action = True
                 self._write_report(encode_report(ui_authorisation_end()))
 
                 # 2. Send auth code.
@@ -428,7 +428,7 @@ class JablotronClient:
                 with contextlib.suppress(OSError):
                     self._write_report(encode_report(ui_authorisation_end()))
 
-                self.command_in_progress = False
+                self.user_initiated_action = False
 
     def export_config(self, code: str) -> None:
         """
@@ -466,7 +466,6 @@ class JablotronClient:
         self._session_lock.acquire()
         try:
             # 1. Clear stale session.
-            self.command_in_progress = True
             self._write_report(encode_report(ui_authorisation_end()))
 
             # 2. Send auth code.
@@ -488,7 +487,6 @@ class JablotronClient:
             with contextlib.suppress(OSError):
                 self._write_report(encode_report(ui_authorisation_end()))
 
-            self.command_in_progress = False
             self._session_lock.release()
             raise
 
@@ -504,7 +502,6 @@ class JablotronClient:
         except OSError:
             LOGGER.debug("Logout write failed")
         finally:
-            self.command_in_progress = False
             self._session_lock.release()
 
     def _wait_for_export_done(self) -> None:

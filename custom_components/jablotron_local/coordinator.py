@@ -206,7 +206,7 @@ class JablotronCoordinator(DataUpdateCoordinator[PanelState]):
             if (
                 status is not None
                 and status.reason == UiStatusReason.WRONG_CODE
-                and not self.client.command_in_progress
+                and not self.client.user_initiated_action
             ):
                 # This should never happen during monitoring.
                 # If it does, something is catastrophically wrong.

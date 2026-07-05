@@ -249,7 +249,7 @@ class TestWrongCodeHandling:
         self, hass: HomeAssistant, caplog: pytest.LogCaptureFixture
     ):
         coordinator = _make_coordinator(hass)
-        coordinator.client.command_in_progress = True
+        coordinator.client.user_initiated_action = True
 
         with caplog.at_level(logging.CRITICAL):
             coordinator._process_packets([_wrong_code_packet()])
@@ -260,7 +260,7 @@ class TestWrongCodeHandling:
         self, hass: HomeAssistant, caplog: pytest.LogCaptureFixture
     ):
         coordinator = _make_coordinator(hass)
-        coordinator.client.command_in_progress = False
+        coordinator.client.user_initiated_action = False
 
         with caplog.at_level(logging.CRITICAL):
             coordinator._process_packets([_wrong_code_packet()])
@@ -271,7 +271,7 @@ class TestWrongCodeHandling:
         self, hass: HomeAssistant, caplog: pytest.LogCaptureFixture
     ):
         coordinator = _make_coordinator(hass)
-        coordinator.client.command_in_progress = False
+        coordinator.client.user_initiated_action = False
 
         # NO_SESSION status (0x06) should not trigger critical log
         packet = Packet(

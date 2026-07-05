@@ -313,7 +313,7 @@ class TestModifySection:
             with pytest.raises(JablotronAuthError):
                 client.modify_section(2, ArmMode.ARM_AWAY, "9991234")
 
-            assert not client.command_in_progress
+            assert not client.user_initiated_action
             client.disconnect()
 
     def test_login_timeout_raises_command_error(self):
@@ -337,7 +337,7 @@ class TestModifySection:
             with pytest.raises(JablotronCommandError):
                 client.modify_section(2, ArmMode.DISARM, "9991234")
 
-            assert not client.command_in_progress
+            assert not client.user_initiated_action
             client.disconnect()
 
     def test_ack_timeout_raises_command_error(self):
@@ -384,7 +384,7 @@ class TestModifySection:
         reader = _ReaderHelper()
 
         def capture_write(_fd: int, data: bytes) -> int:
-            observed_flags.append(client.command_in_progress)
+            observed_flags.append(client.user_initiated_action)
             if _is_auth_code_write(data):
                 reader.inject(_LOGIN_OK)
             elif _is_modify_section_write(data):
@@ -411,7 +411,7 @@ class TestModifySection:
         # Some writes during command should see flag=True
         assert any(observed_flags)
         # After modify_section returns, flag is False
-        assert not client.command_in_progress
+        assert not client.user_initiated_action
 
 
 # ---------------------------------------------------------------------------
