@@ -11,13 +11,23 @@
       },
       "confirm": {
         "title": "Confirm Jablotron panel",
-        "description": "**Panel:** {name}\n**Device:** `{path}`\n**Serial:** `{serial}`\n\nHome Assistant will briefly open the device to verify permissions and exclusive access. Make sure JA-Link / F-Link is closed before continuing."
+        "description": "**Panel:** {name}\n**Device:** `{path}`\n**Serial:** `{serial}`\n\nHome Assistant will briefly open the device to verify permissions and exclusive access. Make sure JA-Link / F-Link is closed before continuing.",
+        "data": {
+          "service_pin": "Service PIN (optional)"
+        },
+        "data_description": {
+          "service_pin": "Service/installer PIN for reading device and section names from the panel. Leave empty to use generic names."
+        }
       },
       "reconfigure": {
         "title": "Reconfigure Jablotron panel",
         "description": "Select the panel this integration should control.",
         "data": {
-          "device_path": "Panel"
+          "device_path": "Panel",
+          "service_pin": "Service PIN (optional)"
+        },
+        "data_description": {
+          "service_pin": "Service/installer PIN for reading device and section names from the panel. Leave empty to use generic names."
         }
       }
     },

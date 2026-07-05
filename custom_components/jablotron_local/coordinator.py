@@ -35,6 +35,7 @@ if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
 
     from .client import JablotronClient
+    from .config_reader import PanelConfig
 
 
 @dataclass
@@ -60,13 +61,20 @@ class JablotronCoordinator(DataUpdateCoordinator[PanelState]):
     notifies entities on every state change.
     """
 
-    def __init__(self, hass: HomeAssistant, client: JablotronClient) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        client: JablotronClient,
+        panel_config: PanelConfig | None = None,
+    ) -> None:
         """
         Initialize the coordinator and wire the client callbacks.
 
         Args:
             hass: Home Assistant instance.
             client: Connected :class:`JablotronClient` instance.
+            panel_config: Parsed panel configuration from FLEXI_LOG,
+                or ``None`` if not available.
 
         """
         super().__init__(
@@ -76,6 +84,7 @@ class JablotronCoordinator(DataUpdateCoordinator[PanelState]):
         )
         self.client = client
         self.data = PanelState()
+        self.panel_config = panel_config
 
         # Wire callbacks - these fire from the reader thread.
         client.on_packets = self._on_packets_from_thread
@@ -83,6 +92,22 @@ class JablotronCoordinator(DataUpdateCoordinator[PanelState]):
 
         # Event signalled when initial sysinfo + sections arrive.
         self._initial_data_ready = asyncio.Event()
+
+    def get_section_name(self, section_number: int) -> str | None:
+        """
+        Get the configured name for a section.
+
+        Args:
+            section_number: Section number (1-based).
+
+        Returns:
+            The section name from panel config, or ``None`` if not available.
+
+        """
+        if self.panel_config is None:
+            return None
+
+        return self.panel_config.section_names.get(section_number)
 
     async def _async_update_data(self) -> PanelState:
         """

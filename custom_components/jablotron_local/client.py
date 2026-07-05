@@ -59,6 +59,7 @@ from .protocol import (
     encode_report,
     ui_authorisation_code,
     ui_authorisation_end,
+    ui_export_config,
     ui_modify_section,
 )
 
@@ -158,6 +159,9 @@ class JablotronClient:
     )
     _cmd_auth_error: bool = field(default=False, init=False, repr=False)
     command_in_progress: bool = field(default=False, init=False, repr=False)
+    _cmd_export_done_event: threading.Event = field(
+        default_factory=threading.Event, init=False, repr=False
+    )
 
     def connect(self) -> None:
         """
@@ -422,6 +426,96 @@ class JablotronClient:
 
             self.command_in_progress = False
 
+    def export_config(self, code: str) -> None:
+        """
+        Trigger config export to the FLEXI_CFG mass storage volume.
+
+        Executes the authenticated export sequence:
+
+        1. AUTH_END (clear any stale session)
+        2. AUTH_CODE (service/installer PIN)
+        3. Wait for LOGIN_INFO
+        4. EXPORT_CONFIG (0x0f)
+        5. Wait for COMMAND_ACK (0x1a)
+        6. Wait for EXPORT_DONE (0x12) (~900ms)
+
+        After this returns successfully, the config data is available
+        at LBA 35-1955 on the FLEXI_CFG block device. The caller MUST
+        read the data and then call :meth:`end_session` to logout.
+
+        Args:
+            code: Full code string: 3-digit user prefix + service PIN
+                (e.g. ``"9991234"``).
+
+        Raises:
+            JablotronAuthError: Panel rejected the PIN.
+            JablotronCommandError: Timeout or unexpected response.
+            JablotronConnectionError: Device not connected.
+
+        """
+        if not self._connected:
+            raise JablotronConnectionError(self.path)
+
+        prefix = code[:3]
+        pin = code[3:]
+
+        try:
+            # 1. Clear stale session.
+            self.command_in_progress = True
+            self._write_report(encode_report(ui_authorisation_end()))
+
+            # 2. Send auth code.
+            self._write_report(encode_report(ui_authorisation_code(prefix, pin)))
+
+            # 3. Wait for login response.
+            self._wait_for_login_response()
+
+            # 4. Trigger config export.
+            self._write_report(encode_report(ui_export_config()))
+
+            # 5. Wait for ACK.
+            self._wait_for_command_ack()
+
+            # 6. Wait for export done (panel writes config to FLEXI_CFG).
+            self._wait_for_export_done()
+        except:
+            # On error, logout immediately.
+            with contextlib.suppress(OSError):
+                self._write_report(encode_report(ui_authorisation_end()))
+
+            self.command_in_progress = False
+            raise
+
+    def end_session(self) -> None:
+        """
+        End the authenticated session (logout).
+
+        Must be called after :meth:`export_config` once the block
+        device data has been read.
+        """
+        try:
+            self._write_report(encode_report(ui_authorisation_end()))
+        except OSError:
+            LOGGER.debug("Logout write failed")
+        finally:
+            self.command_in_progress = False
+
+    def _wait_for_export_done(self) -> None:
+        """
+        Wait for the reader thread to signal EXPORT_DONE (0x12).
+
+        The panel takes ~900ms to write config to FLEXI_CFG.
+
+        Raises:
+            JablotronCommandError: On timeout.
+
+        """
+        self._cmd_export_done_event.clear()
+
+        if not self._cmd_export_done_event.wait(timeout=5.0):
+            msg = "Config export timeout (no 0x12 received)"
+            raise JablotronCommandError(msg)
+
     def _wait_for_login_response(self) -> None:
         """
         Wait for the reader thread to signal login success or failure.
@@ -468,6 +562,9 @@ class JablotronClient:
             elif subtype == UiControl.COMMAND_ACK:
                 LOGGER.debug("Command ACK received")
                 self._cmd_ack_event.set()
+            elif subtype == UiControl.EXPORT_DONE:
+                LOGGER.debug("Config export done")
+                self._cmd_export_done_event.set()
             elif (
                 subtype == UiControl.STATUS
                 and len(packet.data) >= _MIN_STATUS_BYTES

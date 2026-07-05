@@ -102,7 +102,11 @@ class JablotronAlarmPanel(
         super().__init__(coordinator)
         self._section_number = section.number
         self._attr_unique_id = f"{entry.unique_id}_section_{section.number}"
-        self._attr_name = f"Section {section.number}"
+
+        # Use the parsed section name from FLEXI_LOG config if available.
+        section_name = coordinator.get_section_name(section.number)
+        self._attr_name = section_name or f"Section {section.number}"
+
         self._attr_device_info = _device_info(coordinator, entry)
         self._attr_alarm_state = _STATE_MAP.get(section.primary)
 

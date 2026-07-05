@@ -41,6 +41,7 @@ if TYPE_CHECKING:
 
 CONF_DEVICE_PATH = "device_path"
 CONF_SERIAL_NUMBER = "serial_number"
+CONF_SERVICE_PIN = "service_pin"
 
 
 class JablotronLocalConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -182,6 +183,8 @@ class JablotronLocalConfigFlow(ConfigFlow, domain=DOMAIN):
                 data_updates={
                     CONF_DEVICE_PATH: selected.path,
                     CONF_SERIAL_NUMBER: selected.serial,
+                    CONF_SERVICE_PIN: user_input.get(CONF_SERVICE_PIN, "").strip()
+                    or None,
                 },
             )
 
@@ -192,7 +195,11 @@ class JablotronLocalConfigFlow(ConfigFlow, domain=DOMAIN):
                     vol.Required(
                         CONF_DEVICE_PATH,
                         default=entry.data.get(CONF_DEVICE_PATH),
-                    ): vol.In({panel.path: _panel_label(panel) for panel in panels})
+                    ): vol.In({panel.path: _panel_label(panel) for panel in panels}),
+                    vol.Optional(
+                        CONF_SERVICE_PIN,
+                        default=entry.data.get(CONF_SERVICE_PIN, ""),
+                    ): str,
                 }
             ),
         )
@@ -216,19 +223,28 @@ class JablotronLocalConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             error = await self._async_probe(panel.path)
             if error is None:
+                data: dict[str, Any] = {
+                    CONF_DEVICE_PATH: panel.path,
+                    CONF_SERIAL_NUMBER: panel.serial,
+                }
+                service_pin = user_input.get(CONF_SERVICE_PIN, "").strip()
+                if service_pin:
+                    data[CONF_SERVICE_PIN] = service_pin
+
                 return self.async_create_entry(
                     title=panel.name,
-                    data={
-                        CONF_DEVICE_PATH: panel.path,
-                        CONF_SERIAL_NUMBER: panel.serial,
-                    },
+                    data=data,
                 )
 
             errors["base"] = error
 
         return self.async_show_form(
             step_id="confirm",
-            data_schema=vol.Schema({}),
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(CONF_SERVICE_PIN, default=""): str,
+                }
+            ),
             description_placeholders={
                 "name": panel.name,
                 "path": panel.path,

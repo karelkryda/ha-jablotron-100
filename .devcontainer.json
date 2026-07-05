@@ -10,7 +10,7 @@
     }
   },
   "runArgs": [
-    "--device=/dev/hidraw0"
+    "--privileged"
   ],
   "customizations": {
     "vscode": {

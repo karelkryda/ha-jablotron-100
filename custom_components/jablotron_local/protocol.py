@@ -122,6 +122,8 @@ class UiControl(IntEnum):
     COMMAND_ACK = 0x1A  # IN: command accepted
     STATUS = 0x1B  # IN: status / NAK
     TOGGLE_PG_OUTPUT = 0x23  # OUT: toggle a PG output
+    EXPORT_CONFIG = 0x0F  # OUT: trigger config export to FLEXI_CFG
+    EXPORT_DONE = 0x12  # IN: config export complete
 
 
 class UiStatusReason(IntEnum):
@@ -485,6 +487,19 @@ def ui_toggle_pg_output(output: int) -> Packet:
         PacketType.UI_CONTROL,
         bytes([UiControl.TOGGLE_PG_OUTPUT, output]),
     )
+
+
+def ui_export_config() -> Packet:
+    """
+    Build the EXPORT_CONFIG trigger ``80 01 0f``.
+
+    Triggers the panel to export its configuration to the FLEXI_CFG
+    mass storage volume. Requires an active authenticated session with
+    service/installer permissions (ffffffff). The panel responds with
+    COMMAND_ACK (``80 02 1a 0a``) followed by EXPORT_DONE (``80 01 12``)
+    after ~900ms.
+    """
+    return Packet(PacketType.UI_CONTROL, bytes([UiControl.EXPORT_CONFIG]))
 
 
 # Minimum bytes needed for a two-field payload (skip byte + at least one data byte)
