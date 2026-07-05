@@ -141,6 +141,9 @@ class JablotronClient:
     _write_lock: threading.Lock = field(
         default_factory=threading.Lock, init=False, repr=False
     )
+    _session_lock: threading.Lock = field(
+        default_factory=threading.Lock, init=False, repr=False
+    )
     _reader_thread: threading.Thread | None = field(
         default=None, init=False, repr=False
     )
@@ -403,28 +406,29 @@ class JablotronClient:
         prefix = code[:3]
         pin = code[3:]
 
-        try:
-            # 1. Clear stale session.
-            self.command_in_progress = True
-            self._write_report(encode_report(ui_authorisation_end()))
-
-            # 2. Send auth code.
-            self._write_report(encode_report(ui_authorisation_code(prefix, pin)))
-
-            # 3. Wait for login response.
-            self._wait_for_login_response()
-
-            # 4. Send modify section command.
-            self._write_report(encode_report(ui_modify_section(section, mode)))
-
-            # 5. Wait for command ACK.
-            self._wait_for_command_ack()
-        finally:
-            # 6. Always logout, even on error.
-            with contextlib.suppress(OSError):
+        with self._session_lock:
+            try:
+                # 1. Clear stale session.
+                self.command_in_progress = True
                 self._write_report(encode_report(ui_authorisation_end()))
 
-            self.command_in_progress = False
+                # 2. Send auth code.
+                self._write_report(encode_report(ui_authorisation_code(prefix, pin)))
+
+                # 3. Wait for login response.
+                self._wait_for_login_response()
+
+                # 4. Send modify section command.
+                self._write_report(encode_report(ui_modify_section(section, mode)))
+
+                # 5. Wait for command ACK.
+                self._wait_for_command_ack()
+            finally:
+                # 6. Always logout, even on error.
+                with contextlib.suppress(OSError):
+                    self._write_report(encode_report(ui_authorisation_end()))
+
+                self.command_in_progress = False
 
     def export_config(self, code: str) -> None:
         """
@@ -459,6 +463,7 @@ class JablotronClient:
         prefix = code[:3]
         pin = code[3:]
 
+        self._session_lock.acquire()
         try:
             # 1. Clear stale session.
             self.command_in_progress = True
@@ -479,16 +484,17 @@ class JablotronClient:
             # 6. Wait for export done (panel writes config to FLEXI_CFG).
             self._wait_for_export_done()
         except:
-            # On error, logout immediately.
+            # On error, logout and release lock.
             with contextlib.suppress(OSError):
                 self._write_report(encode_report(ui_authorisation_end()))
 
             self.command_in_progress = False
+            self._session_lock.release()
             raise
 
     def end_session(self) -> None:
         """
-        End the authenticated session (logout).
+        End the authenticated session and release the session lock.
 
         Must be called after :meth:`export_config` once the block
         device data has been read.
@@ -499,6 +505,7 @@ class JablotronClient:
             LOGGER.debug("Logout write failed")
         finally:
             self.command_in_progress = False
+            self._session_lock.release()
 
     def _wait_for_export_done(self) -> None:
         """
