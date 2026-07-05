@@ -186,6 +186,10 @@ class JablotronClient:
     """True only during user arm/disarm. If WRONG_CODE arrives while False,
     the coordinator triggers reauthentication (bad service PIN or bug)."""
 
+    service_pin_rejected: bool = field(default=False, init=False, repr=False)
+    """Set True if any internal action gets WRONG_CODE. Blocks all further
+    internal auth sessions until entry is reconfigured."""
+
     def connect(self) -> None:
         """
         Open the device and start the reader thread.
@@ -479,6 +483,9 @@ class JablotronClient:
         """
         if not self._connected:
             raise JablotronConnectionError(self.path)
+
+        if self.service_pin_rejected:
+            raise JablotronAuthError
 
         prefix = code[:3]
         pin = code[3:]

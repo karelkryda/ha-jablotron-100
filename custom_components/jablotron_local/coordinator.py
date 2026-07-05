@@ -215,6 +215,7 @@ class JablotronCoordinator(DataUpdateCoordinator[PanelState]):
                     "Panel reported WRONG_CODE without user action; "
                     "forcing reauthentication"
                 )
+                self.client.service_pin_rejected = True
                 if self.config_entry:
                     self.config_entry.async_start_reauth(self.hass)
 
