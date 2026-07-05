@@ -22,12 +22,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .client import JablotronAuthError, JablotronCommandError
 from .const import DOMAIN
 from .coordinator import JablotronCoordinator, PanelState
-from .protocol import ArmMode, SectionPrimaryState, SectionState
-
-# Default user prefix for code encoding. "999" tells the panel to
-# match the PIN against all configured users (wildcard lookup).
-# Panels with CodesWithPrefix=false (our verified type) always use this.
-_DEFAULT_CODE_PREFIX = "999"
+from .protocol import CODE_PREFIX_WILDCARD, ArmMode, SectionPrimaryState, SectionState
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -163,7 +158,7 @@ class JablotronAlarmPanel(
             )
 
         try:
-            full_code = _DEFAULT_CODE_PREFIX + code
+            full_code = CODE_PREFIX_WILDCARD + code
             await self.hass.async_add_executor_job(
                 self.coordinator.client.modify_section,
                 self._section_number,

@@ -26,6 +26,7 @@ from .config_reader import (
 from .const import LOGGER
 from .coordinator import JablotronCoordinator
 from .data import JablotronConfigEntry, JablotronData
+from .protocol import CODE_PREFIX_WILDCARD
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -119,7 +120,7 @@ def _export_and_read_config(
 
     # 2. Trigger config export via authenticated HID session.
     try:
-        code = "999" + service_pin
+        code = CODE_PREFIX_WILDCARD + service_pin
         client.export_config(code)
     except JablotronAuthError:
         LOGGER.warning(

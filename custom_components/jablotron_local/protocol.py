@@ -71,6 +71,13 @@ CODE_MIN_LENGTH: int = 4
 CODE_MAX_LENGTH: int = 10
 """Maximum PIN length accepted by the panel."""
 
+CODE_PREFIX_WILDCARD: str = "999"
+"""Wildcard user-index prefix for code encoding.
+
+Tells the panel to match the PIN against all configured users.
+Used on panels with CodesWithPrefix=false.
+"""
+
 # ---------------------------------------------------------------------------
 # Timing (seconds) - use these in client.py, not magic numbers
 # ---------------------------------------------------------------------------

@@ -138,33 +138,53 @@ class JablotronClient:
     on_connection_change: ConnectionCallback | None = None
 
     _fd: int = field(default=-1, init=False, repr=False)
+    """File descriptor for the open hidraw device, or -1 if closed."""
+
     _write_lock: threading.Lock = field(
         default_factory=threading.Lock, init=False, repr=False
     )
+    """Serializes individual 64-byte HID report writes."""
+
     _session_lock: threading.Lock = field(
         default_factory=threading.Lock, init=False, repr=False
     )
+    """Serializes authenticated sessions (login to logout). Held by
+    modify_section for ~20ms, by export_config until end_session()."""
+
     _reader_thread: threading.Thread | None = field(
         default=None, init=False, repr=False
     )
+    """Background thread running the read/keepalive/reconnect loop."""
+
     _stop_event: threading.Event = field(
         default_factory=threading.Event, init=False, repr=False
     )
-    _connected: bool = field(default=False, init=False, repr=False)
+    """Set to signal the reader thread to exit."""
 
-    # Command response signalling: the reader thread sets these when it
-    # sees LOGIN_INFO, WRONG_CODE, or COMMAND_ACK during a command.
     _cmd_login_event: threading.Event = field(
         default_factory=threading.Event, init=False, repr=False
     )
+    """Signalled by reader thread when LOGIN_INFO or WRONG_CODE arrives."""
+
     _cmd_ack_event: threading.Event = field(
         default_factory=threading.Event, init=False, repr=False
     )
-    _cmd_auth_error: bool = field(default=False, init=False, repr=False)
-    user_initiated_action: bool = field(default=False, init=False, repr=False)
+    """Signalled by reader thread when COMMAND_ACK arrives."""
+
     _cmd_export_done_event: threading.Event = field(
         default_factory=threading.Event, init=False, repr=False
     )
+    """Signalled by reader thread when EXPORT_DONE (0x12) arrives."""
+
+    _connected: bool = field(default=False, init=False, repr=False)
+    """Whether the device fd is currently open and usable."""
+
+    _cmd_auth_error: bool = field(default=False, init=False, repr=False)
+    """Set True by reader thread if WRONG_CODE detected during login."""
+
+    user_initiated_action: bool = field(default=False, init=False, repr=False)
+    """True only during user arm/disarm. If WRONG_CODE arrives while False,
+    the coordinator triggers reauthentication (bad service PIN or bug)."""
 
     def connect(self) -> None:
         """
