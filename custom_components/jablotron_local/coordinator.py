@@ -20,6 +20,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .const import LOGGER
 from .protocol import (
+    DeviceInfo,
     Packet,
     PacketType,
     SectionState,
@@ -49,6 +50,7 @@ class PanelState:
     sections: list[SectionState] = field(default_factory=list)
     active_devices: frozenset[int] = field(default_factory=frozenset)
     system_info: dict[str, str] = field(default_factory=dict)
+    device_infos: dict[int, DeviceInfo] = field(default_factory=dict)
     connected: bool = False
 
 

@@ -19,6 +19,7 @@ from .client import (
 from .config_flow import CONF_DEVICE_PATH, CONF_SERVICE_PIN
 from .config_reader import (
     ConfigReadError,
+    DeviceEntry,
     PanelConfig,
     find_flexi_cfg_device,
     read_panel_config,
@@ -34,6 +35,7 @@ if TYPE_CHECKING:
 PLATFORMS: list[Platform] = [
     Platform.ALARM_CONTROL_PANEL,
     Platform.BINARY_SENSOR,
+    Platform.SENSOR,
 ]
 
 
@@ -62,13 +64,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: JablotronConfigEntry) ->
     # panel typically responds within ~50ms. We give it up to 2s.
     await coordinator.async_wait_for_initial_data()
 
-    # Read panel config (device/section names) if service PIN is configured.
+    # Read panel config and probe device status if service PIN is configured.
     service_pin = entry.data.get(CONF_SERVICE_PIN)
     if service_pin:
         panel_config = await hass.async_add_executor_job(
             _export_and_read_config, client, device_path, service_pin
         )
         coordinator.panel_config = panel_config
+
+        # Probe device status (battery, signal) in a separate session.
+        devices = panel_config.devices if panel_config else []
+        if devices:
+            statuses = await hass.async_add_executor_job(
+                _probe_device_status, client, service_pin, devices
+            )
+            coordinator.data.device_infos = {s.device_number: s for s in statuses}
 
     entry.runtime_data = JablotronData(
         client=client,
@@ -148,3 +158,28 @@ def _export_and_read_config(
     finally:
         # 4. Always end the authenticated session after reading.
         client.end_session()
+
+
+def _probe_device_status(
+    client: JablotronClient, service_pin: str, devices: list[DeviceEntry]
+) -> list:
+    """
+    Probe devices for status (battery, signal) in a single session.
+
+    Non-fatal: returns empty list on any failure.
+
+    Args:
+        client: Connected HID client.
+        service_pin: Service/installer PIN (digits only).
+        devices: List of devices to probe.
+
+    """
+    try:
+        code = CODE_PREFIX_WILDCARD + service_pin
+        return client.probe_all_devices(code, devices)
+    except JablotronAuthError:
+        LOGGER.warning("Service PIN rejected during device probe")
+        return []
+    except JablotronCommandError as err:
+        LOGGER.warning("Device probe failed: %s", err.detail)
+        return []

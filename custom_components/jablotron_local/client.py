@@ -37,24 +37,36 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from .const import LOGGER
 from .protocol import (
     COMMAND_ACK_TIMEOUT,
+    DEVICE_STATUS_TIMEOUT,
     ENABLE_DEV_STATES_INTERVAL,
     HEARTBEAT_INTERVAL,
     LOGIN_TIMEOUT,
     REPORT_SIZE,
     ArmMode,
+    Command,
+    DeviceDiagnostic,
+    DeviceInfo,
+    DeviceStatus,
     Packet,
     PacketType,
     SysInfoType,
     UiControl,
     UiStatusReason,
+    cmd_diagnostics_force_info,
+    cmd_diagnostics_start,
+    cmd_diagnostics_stop,
     cmd_enable_device_states,
     cmd_get_sections_and_pg,
     cmd_get_system_info,
     cmd_heartbeat,
+    cmd_query_device_status,
+    decode_device_diagnostic,
+    decode_device_status,
     decode_report,
     encode_report,
     ui_authorisation_code,
@@ -62,6 +74,9 @@ from .protocol import (
     ui_export_config,
     ui_modify_section,
 )
+
+if TYPE_CHECKING:
+    from .config_reader import DeviceEntry
 
 # Report-ID byte prepended to every write for Linux hidraw.
 _REPORT_ID = b"\x00"
@@ -175,6 +190,26 @@ class JablotronClient:
         default_factory=threading.Event, init=False, repr=False
     )
     """Signalled by reader thread when EXPORT_DONE (0x12) arrives."""
+
+    _cmd_device_status_event: threading.Event = field(
+        default_factory=threading.Event, init=False, repr=False
+    )
+    """Signalled by reader thread when device status response (0xa8) arrives."""
+
+    _cmd_device_status_response: DeviceStatus | None = field(
+        default=None, init=False, repr=False
+    )
+    """Last parsed device status response, set by reader thread."""
+
+    _cmd_diagnostic_event: threading.Event = field(
+        default_factory=threading.Event, init=False, repr=False
+    )
+    """Signalled by reader thread when diagnostics response (0x90) arrives."""
+
+    _cmd_diagnostic_response: DeviceDiagnostic | None = field(
+        default=None, init=False, repr=False
+    )
+    """Last parsed diagnostics response, set by reader thread."""
 
     _connected: bool = field(default=False, init=False, repr=False)
     """Whether the device fd is currently open and usable."""
@@ -531,6 +566,165 @@ class JablotronClient:
         finally:
             self._session_lock.release()
 
+    def probe_all_devices(
+        self, code: str, devices: list[DeviceEntry]
+    ) -> list[DeviceInfo]:
+        """
+        Query status of devices in a single authenticated session.
+
+        For each device:
+        - Queries ``52 02 28`` for basic status
+        - If bus device: also runs ``94``/``96`` for signal and battery
+
+        Returns consolidated DeviceInfo per device.
+
+        Args:
+            code: Full code string (prefix + service PIN).
+            devices: List of device to query.
+
+        Returns:
+            List of :class:`DeviceInfo` for each device that responded.
+
+        Raises:
+            JablotronAuthError: Panel rejected the PIN.
+            JablotronCommandError: Timeout or unexpected response.
+            JablotronConnectionError: Device not connected.
+
+        """
+        if not self._connected:
+            raise JablotronConnectionError(self.path)
+
+        if self.service_pin_rejected:
+            raise JablotronAuthError
+
+        prefix = code[:3]
+        pin = code[3:]
+        results: list[DeviceInfo] = []
+
+        with self._session_lock:
+            try:
+                # 1. Clear stale session.
+                self._write_report(encode_report(ui_authorisation_end()))
+
+                # 2. Send auth code.
+                self._write_report(encode_report(ui_authorisation_code(prefix, pin)))
+
+                # 3. Wait for login response.
+                self._wait_for_login_response()
+
+                # 4. Query each device.
+                for device in devices:
+                    if self.service_pin_rejected:
+                        break
+
+                    # Get device status
+                    status = self._query_single_device(device.position)
+
+                    # Get device diagnostic for bus device
+                    diagnostic = None
+                    if device.is_bus_device:
+                        diagnostic = self._query_bus_device_diagnostics(device.position)
+
+                    if status is not None:
+                        if diagnostic is not None:
+                            # Bus: signal/battery/voltage from diagnostics.
+                            results.append(
+                                DeviceInfo(
+                                    device_number=status.device_number,
+                                    signal=diagnostic.signal,
+                                    battery=diagnostic.battery,
+                                    voltage=diagnostic.voltage,
+                                    voltage_current=diagnostic.voltage_current,
+                                    active=status.active,
+                                )
+                            )
+                        else:
+                            # Wireless: signal/battery from 0x28 status.
+                            results.append(
+                                DeviceInfo(
+                                    device_number=status.device_number,
+                                    signal=status.signal,
+                                    battery=status.battery,
+                                    active=status.active,
+                                )
+                            )
+
+            finally:
+                # 5. Always logout.
+                with contextlib.suppress(OSError):
+                    self._write_report(encode_report(ui_authorisation_end()))
+
+        LOGGER.debug("Probed %d/%d devices", len(results), len(devices))
+        return results
+
+    def _query_single_device(self, device_number: int) -> DeviceStatus | None:
+        """
+        Send a device status query and wait for the response.
+
+        Must be called within an active authenticated session.
+
+        Args:
+            device_number: 0-based device number.
+
+        Returns:
+            Parsed :class:`DeviceStatus` or ``None`` on timeout.
+
+        """
+        self._cmd_device_status_event.clear()
+        self._cmd_device_status_response = None
+
+        self._write_report(encode_report(cmd_query_device_status(device_number)))
+
+        if not self._cmd_device_status_event.wait(timeout=DEVICE_STATUS_TIMEOUT):
+            LOGGER.debug("Device %d status timeout", device_number)
+            return None
+
+        return self._cmd_device_status_response
+
+    def _query_bus_device_diagnostics(
+        self, device_number: int
+    ) -> DeviceDiagnostic | None:
+        """
+        Run the 94/96 diagnostics sequence for a bus device.
+
+        Sequence:
+        1. Start diagnostics (94 02 [dev] 01)
+        2. Force info report (96 03 [dev] 09 00)
+        3. Wait for 0x90 response
+        4. Stop diagnostics (94 02 [dev] 00)
+
+        Must be called within an active authenticated session.
+
+        Args:
+            device_number: 0-based device number.
+
+        Returns:
+            Parsed :class:`DeviceDiagnostic` or ``None`` on timeout.
+
+        """
+        self._cmd_diagnostic_event.clear()
+        self._cmd_diagnostic_response = None
+
+        # 1. Start diagnostics.
+        self._write_report(encode_report(cmd_diagnostics_start(device_number)))
+
+        # 2. Force info report.
+        self._write_report(encode_report(cmd_diagnostics_force_info(device_number)))
+
+        # 3. Wait for response.
+        if not self._cmd_diagnostic_event.wait(timeout=DEVICE_STATUS_TIMEOUT):
+            LOGGER.debug("Device %d diagnostics timeout", device_number)
+            # Still stop diagnostics on timeout.
+            with contextlib.suppress(OSError):
+                self._write_report(encode_report(cmd_diagnostics_stop(device_number)))
+
+            return None
+
+        # 4. Stop diagnostics.
+        self._write_report(encode_report(cmd_diagnostics_stop(device_number)))
+
+        return self._cmd_diagnostic_response
+
     def _wait_for_export_done(self) -> None:
         """
         Wait for the reader thread to signal EXPORT_DONE (0x12).
@@ -583,6 +777,28 @@ class JablotronClient:
     def _check_command_responses(self, packets: list[Packet]) -> None:
         """Check decoded packets for command-response subtypes and signal."""
         for packet in packets:
+            # Device status responses come as COMMAND (0x52) packets.
+            if (
+                packet.type == PacketType.COMMAND
+                and packet.data
+                and packet.data[0] == Command.QUERY_DEVICE_STATUS_RESPONSE
+            ):
+                status = decode_device_status(packet.data)
+                if status is not None:
+                    self._cmd_device_status_response = status
+                    self._cmd_device_status_event.set()
+
+                continue
+
+            # Bus diagnostics responses come as DEVICE_INFO (0x90) packets.
+            if packet.type == PacketType.DEVICE_INFO and packet.data:
+                info = decode_device_diagnostic(packet.data)
+                if info is not None:
+                    self._cmd_diagnostic_response = info
+                    self._cmd_diagnostic_event.set()
+
+                continue
+
             if packet.type != PacketType.UI_CONTROL or not packet.data:
                 continue
 

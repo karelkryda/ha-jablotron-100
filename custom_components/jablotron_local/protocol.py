@@ -38,9 +38,8 @@ Code encoding (pcap-verified)
 ------------------------------
 Wire format is: subtype 0x03 followed by ``(prefix + pin).encode('ascii')``.
 For example, user 999, PIN 1234 gives ``03 39 39 39 31 32 33 34``.
-This matches kukulich's ``magic_offset=48 + int(digit)`` formula since
-``chr(48 + d) == str(d)`` for d in 0..9. His hardcoded ``b'\x39\x39\x39'``
-is just ``b'999'`` as ASCII. Both produce identical wire bytes.
+This is simply ``(prefix + pin).encode('ascii')`` since ``chr(48 + d) == str(d)``
+for d in 0..9.
 
 MODIFY_SECTION byte (pcap-verified for section 2)
 --------------------------------------------------
@@ -88,6 +87,7 @@ ENABLE_DEV_STATES_MINUTES: int = 5
 LOGIN_TIMEOUT: float = 2.0
 COMMAND_ACK_TIMEOUT: float = 2.0
 STATE_CONFIRM_TIMEOUT: float = 5.0
+DEVICE_STATUS_TIMEOUT: float = 2.0
 
 
 # ---------------------------------------------------------------------------
@@ -105,7 +105,9 @@ class PacketType(IntEnum):
     COMMAND = 0x52  # OUT: code-free commands (heartbeat, etc.)
     DEVICE_STATE = 0x55  # IN: individual device event
     UI_CONTROL = 0x80  # BOTH: authentication and section control
-    DEVICE_INFO = 0x90  # IN: device details
+    DEVICE_INFO = 0x90  # IN: device details (response to 94/96 diag)
+    DIAGNOSTICS = 0x94  # OUT: start/stop diagnostics for a bus device
+    DIAGNOSTICS_COMMAND = 0x96  # OUT: force info report from bus device
     DEVICES_STATES = 0xD8  # IN: activity bitmap (little-endian)
 
 
@@ -113,9 +115,10 @@ class Command(IntEnum):
     """Subtype byte for :attr:`PacketType.COMMAND` packets (OUT)."""
 
     HEARTBEAT = 0x02  # 52 01 02 - link keepalive, unauthenticated
-    GET_DEVICE_STATUS = 0x0A  # 52 02 0a <n> - request device info
     GET_SECTIONS_AND_PG = 0x0E  # 52 01 0e - request current sections + PG
     ENABLE_DEV_STATES = 0x13  # 52 02 13 <minutes>
+    QUERY_DEVICE_STATUS = 0x28  # 52 02 28 <n> - requires auth
+    QUERY_DEVICE_STATUS_RESPONSE = 0xA8  # 52 xx a8 <n> ... - response to 0x28
 
 
 class UiControl(IntEnum):
@@ -145,9 +148,6 @@ class SysInfoType(IntEnum):
 
     MODEL = 0x02
     # NOTE: 0x08 = FIRMWARE, 0x09 = HARDWARE.
-    # Kukulich's labels are swapped; verified against capture:
-    # type 0x08 → "MD6112.07.0" = firmware string
-    # type 0x09 → "MD15005"     = hardware string
     FIRMWARE = 0x08
     HARDWARE = 0x09
     REG_CODE = 0x0A
@@ -185,7 +185,7 @@ class ArmMode(IntEnum):
     DISARM = 0x8F  # base: section 2 disarm = 0x91 ✓ pcap
     ARM_AWAY = 0x9F  # base: section 2 arm    = 0xa1 ✓ pcap
     ARM_HOME = 0xAF  # base: formula-derived, not yet pcap-verified
-    ARM_NIGHT = 0xAF  # base: same as ARM_HOME per kukulich, not yet verified
+    ARM_NIGHT = 0xAF  # base: same as ARM_HOME, not yet verified
 
 
 # ---------------------------------------------------------------------------
@@ -271,6 +271,102 @@ class UiStatusEvent:
 
     reason: int
     raw: bytes
+
+
+@dataclass(frozen=True, slots=True)
+class DeviceStatus:
+    """
+    Status of a single device from a ``52 xx a8`` response.
+
+    Attributes:
+        device_number: 0-based device number.
+        signal: Signal strength percentage (0-100), or None if not in response.
+        battery: Battery level percentage (0-100), or None if not in response.
+        active: Whether the device is currently active/triggered.
+
+    """
+
+    device_number: int
+    signal: int | None
+    battery: int | None
+    active: bool
+
+
+@dataclass(frozen=True, slots=True)
+class DeviceDiagnostic:
+    """
+    Parsed diagnostics response from ``94``/``96`` sequence (0x90 reply).
+
+    Attributes:
+        device_number: 0-based device number.
+        signal: Bus signal quality percentage (0-100).
+        battery: Battery percentage (0-100), or None if bus-powered.
+        voltage: Battery voltage in volts (sirens), or None.
+        voltage_current: Current battery voltage (sirens), or None.
+
+    """
+
+    device_number: int
+    signal: int
+    battery: int | None
+    voltage: float | None
+    voltage_current: float | None
+
+
+@dataclass(frozen=True, slots=True)
+class DeviceInfo:
+    """
+    Consolidated device info used by sensor entities.
+
+    Built from DeviceStatus (0x28 response) and optionally enriched
+    by DeviceDiagnostic (94/96 response) for bus devices.
+
+    Attributes:
+        device_number: 0-based device number.
+        signal: Signal strength percentage (0-100), or None.
+        battery: Battery level percentage (0-100), or None.
+        voltage: Battery voltage in volts (sirens), or None.
+        voltage_current: Current battery voltage in volts (sirens), or None.
+        active: Whether the device is currently active/triggered.
+
+    """
+
+    device_number: int
+    signal: int | None
+    battery: int | None
+    voltage: float | None = None
+    voltage_current: float | None = None
+    active: bool = False
+
+
+# Diagnostics subtype in 0x90 response indicating requested info.
+_DEVICE_INFO_REQUESTED: int = 0x0A
+# Minimum response length for bus device info (dev + subtype + len + flags + signal).
+_MIN_BUS_INFO_BYTES: int = 5
+# Offset of signal byte in bus device info response.
+_BUS_INFO_SIGNAL_OFFSET: int = 4
+
+# Wireless marker byte separating activity from radio data.
+_WIRELESS_MARKER: int = 0xFC
+# Wired marker byte.
+_WIRED_MARKER: int = 0xF2
+
+# Battery special values: bytes >= this threshold are not real levels
+# (would yield >100% if decoded). Exact meanings unverified for 0xa8 responses.
+_BATTERY_SPECIAL_THRESHOLD: int = 0x0B
+
+# Battery level calculation.
+_BATTERY_LEVEL_STEP: int = 10
+_BATTERY_MAX_PERCENT: int = 100
+
+# Minimum response length for device status (subtype + device_number + flags).
+_MIN_DEVICE_STATUS_BYTES: int = 3
+# Byte offset of the activity field in device status response.
+_ACTIVITY_OFFSET: int = 4
+# Activity field minimum data length for wired check.
+_WIRED_ACTIVITY_END: int = 5
+# Activity value meaning "never communicated".
+_ACTIVITY_NEVER: int = 0xFF
 
 
 # ---------------------------------------------------------------------------
@@ -436,10 +532,6 @@ def ui_authorisation_code(prefix: str, code: str) -> Packet:
     - User 999 / PIN 1234 → ``03 39 39 39 31 32 33 34``
     - User 001 / PIN 1234 → ``03 30 30 31 31 32 33 34`` (wrong code)
 
-    This is equivalent to kukulich's ``magic_offset=48 + int(digit)``
-    formula since ``48 + d == ord(str(d))`` for d in 0..9, but expressed
-    more directly.
-
     Args:
         prefix: 3-digit user-index prefix (e.g. ``"999"`` for the master
             / service user, ``"001"`` for user 1).
@@ -507,6 +599,66 @@ def ui_export_config() -> Packet:
     after ~900ms.
     """
     return Packet(PacketType.UI_CONTROL, bytes([UiControl.EXPORT_CONFIG]))
+
+
+def cmd_query_device_status(device_number: int) -> Packet:
+    """
+    Build the device status query ``52 02 28 <device_number>``.
+
+    Requires an active authenticated session. The panel responds with
+    a ``52 xx a8 <device_number> ...`` packet containing signal
+    strength and battery level for wireless devices.
+
+    Args:
+        device_number: 0-based device number.
+
+    """
+    return Packet(
+        PacketType.COMMAND,
+        bytes([Command.QUERY_DEVICE_STATUS, device_number]),
+    )
+
+
+def cmd_diagnostics_start(device_number: int) -> Packet:
+    """
+    Build the diagnostics start command ``94 02 [dev] 01``.
+
+    Starts diagnostics mode for a bus device. Must be followed by
+    :func:`cmd_diagnostics_force_info` and eventually
+    :func:`cmd_diagnostics_stop`.
+
+    Requires an active authenticated session. Only works for bus devices.
+    """
+    return Packet(
+        PacketType.DIAGNOSTICS,
+        bytes([device_number, 0x01]),
+    )
+
+
+def cmd_diagnostics_force_info(device_number: int) -> Packet:
+    """
+    Build the force-info command ``96 03 [dev] 09 00``.
+
+    Requests an info report from the bus device. The panel responds
+    with a ``90 [len] [dev] 0a [payload...]`` packet.
+    """
+    return Packet(
+        PacketType.DIAGNOSTICS_COMMAND,
+        bytes([device_number, 0x09, 0x00]),
+    )
+
+
+def cmd_diagnostics_stop(device_number: int) -> Packet:
+    """
+    Build the diagnostics stop command ``94 02 [dev] 00``.
+
+    Stops diagnostics mode for the device. Must be called after
+    the info response is received.
+    """
+    return Packet(
+        PacketType.DIAGNOSTICS,
+        bytes([device_number, 0x00]),
+    )
 
 
 # Minimum bytes needed for a two-field payload (skip byte + at least one data byte)
@@ -623,3 +775,202 @@ def decode_ui_status(data: bytes) -> UiStatusEvent | None:
         return None
 
     return UiStatusEvent(reason=data[1], raw=bytes(data))
+
+
+def decode_device_status(data: bytes) -> DeviceStatus | None:
+    """
+    Decode the payload of a device status response (``52 xx a8 ...``).
+
+    The caller passes the full DATA bytes of the 0x52 TLV atom.
+    The first byte must be :attr:`Command.QUERY_DEVICE_STATUS_RESPONSE`
+    (0xa8).
+
+    Response formats::
+
+        Wired:    a8 [dev] [flags] [b2] [act_hi] [act_lo] 00 f2 [state]
+        Wireless: a8 [dev] [flags] [b2] [act_hi] [act_lo] [ex] fc [sig] [bat] 00
+
+    Args:
+        data: Raw DATA bytes from a 0x52 TLV atom whose first byte is 0xa8.
+
+    Returns:
+        :class:`DeviceStatus` or ``None`` if the data is malformed.
+
+    """
+    if len(data) < _MIN_DEVICE_STATUS_BYTES:
+        return None
+
+    if data[0] != Command.QUERY_DEVICE_STATUS_RESPONSE:
+        return None
+
+    device_number = data[1]
+
+    # Find the marker byte to determine response format.
+    fc_idx = data.find(_WIRELESS_MARKER, 2)
+    f2_idx = data.find(_WIRED_MARKER, 2)
+
+    if fc_idx > 0 and len(data) > fc_idx + 2:
+        # Wireless device: fc [signal] [battery] 00
+        signal_byte = data[fc_idx + 1]
+        battery_byte = data[fc_idx + 2]
+
+        signal = _decode_signal(signal_byte)
+        battery = _decode_battery(battery_byte)
+
+        # Activity: 0xFF means never communicated.
+        active = (
+            len(data) > _ACTIVITY_OFFSET
+            and data[_ACTIVITY_OFFSET] != _ACTIVITY_NEVER
+            and data[_ACTIVITY_OFFSET] != 0x00
+        )
+
+        return DeviceStatus(
+            device_number=device_number,
+            signal=signal,
+            battery=battery,
+            active=active,
+        )
+
+    if f2_idx > 0:
+        # Wired device: f2 [state_byte]
+        # Activity check: bytes 4-5 (activity_hi, activity_lo).
+        active = len(data) > _WIRED_ACTIVITY_END and (
+            data[_ACTIVITY_OFFSET] != 0x00 or data[_WIRED_ACTIVITY_END] != 0x00
+        )
+
+        return DeviceStatus(
+            device_number=device_number,
+            signal=None,
+            battery=None,
+            active=active,
+        )
+
+    # Unknown format - return minimal info.
+    return DeviceStatus(
+        device_number=device_number,
+        signal=None,
+        battery=None,
+        active=False,
+    )
+
+
+def _decode_signal(byte: int) -> int:
+    """
+    Decode a signal strength byte to a percentage.
+
+    Formula not fully confirmed for 0xa8 responses. Using lower 5 bits
+    times 5 as a reasonable approximation. Clamped to 0-100.
+    """
+    raw = (byte & 0x1F) * 5
+    return min(raw, _BATTERY_MAX_PERCENT)
+
+
+def _decode_battery(byte: int) -> int | None:
+    """
+    Decode a battery level byte to a percentage.
+
+    Lower nibble * 10 = percentage. Special values 0x0b-0x0f are
+    not real battery levels (no change, external power, etc.).
+
+    Returns:
+        Battery percentage (0-100), or ``None`` for special values.
+
+    """
+    if byte >= _BATTERY_SPECIAL_THRESHOLD:
+        return None
+
+    level = (byte & 0x0F) * _BATTERY_LEVEL_STEP
+    return min(level, _BATTERY_MAX_PERCENT)
+
+
+def decode_device_diagnostic(data: bytes) -> DeviceDiagnostic | None:
+    """
+    Decode a 0x90 diagnostics response.
+
+    Response format::
+
+        [dev_num] 0a [payload_len] [flags] [signal] [rest...]
+
+    Flags byte doubles as battery indicator (same encoding as wireless):
+    - < 0x0b: battery percentage (lower nibble * 10)
+    - = 0x0a: siren (voltage in payload as uint16 LE centivolts)
+    - >= 0x0b: bus-powered, no battery
+
+    Args:
+        data: Raw DATA bytes from a 0x90 TLV atom.
+
+    Returns:
+        :class:`DeviceDiagnostic` or ``None`` if malformed.
+
+    """
+    # Minimum: dev_num + 0x0a + payload_len + flags + signal = 5 bytes
+    if len(data) < _MIN_BUS_INFO_BYTES:
+        return None
+
+    device_number = data[0]
+    subtype = data[1]
+
+    if subtype != _DEVICE_INFO_REQUESTED:
+        return None
+
+    flags = data[3]
+    signal_raw = (
+        data[_BUS_INFO_SIGNAL_OFFSET] if len(data) > _BUS_INFO_SIGNAL_OFFSET else 0
+    )
+    signal = min((signal_raw & 0x1F) * 5, 100)
+    rest = data[5:]
+
+    # Parse battery based on flags.
+    battery: int | None = None
+    voltage: float | None = None
+    voltage_current: float | None = None
+
+    if flags == _SIREN_FLAGS:
+        # Siren: voltages in payload as 6c 00 [v1_LE] 6c 01 [v2_LE]
+        voltage, voltage_current = _parse_siren_voltages(rest)
+    elif flags < _BATTERY_SPECIAL_THRESHOLD:
+        # Battery percentage from flags byte (same as wireless encoding).
+        battery = (flags & 0x0F) * _BATTERY_LEVEL_STEP
+
+    return DeviceDiagnostic(
+        device_number=device_number,
+        signal=signal,
+        battery=battery,
+        voltage=voltage,
+        voltage_current=voltage_current,
+    )
+
+
+# Siren flags value.
+_SIREN_FLAGS: int = 0x0A
+# Siren voltage marker byte.
+_SIREN_VOLTAGE_MARKER: int = 0x6C
+
+
+def _parse_siren_voltages(rest: bytes) -> tuple[float | None, float | None]:
+    """
+    Parse both battery voltages from siren diagnostic payload.
+
+    Format: ``6c 00 [v1_LE_uint16] 6c 01 [v2_LE_uint16]``
+    Voltages are in centivolts (330 = 3.30V).
+
+    Returns:
+        Tuple of (voltage, voltage_current).
+
+    """
+    v1: float | None = None
+    v2: float | None = None
+    idx = 0
+    while idx < len(rest) - 3:
+        if rest[idx] == _SIREN_VOLTAGE_MARKER:
+            cv = int.from_bytes(rest[idx + 2 : idx + 4], "little")
+            if rest[idx + 1] == 0x00:
+                v1 = cv / 100.0
+            elif rest[idx + 1] == 0x01:
+                v2 = cv / 100.0
+
+            idx += 4
+        else:
+            idx += 1
+
+    return v1, v2

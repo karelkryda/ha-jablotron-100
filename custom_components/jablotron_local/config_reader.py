@@ -56,6 +56,13 @@ _MAX_SECTION_BYTE: int = 0x0F
 _SECTION_RECORD_SUBTAG: int = 0x81
 _SECTION_NAME_SUBTAG: int = 0x85
 
+# RF byte0 range for bus/wired devices (0x10-0x1f).
+_RF_BUS_MIN: int = 0x10
+_RF_BUS_MAX: int = 0x1F
+
+# RF address marker pattern: 88 00 ce [rf_byte0]
+_RF_MARKER = bytes([0x88, 0x00, 0xCE])
+
 # FLEXI_CFG is identified by its FAT16 volume label in the VBR.
 # The panel's partition table starts at LBA 1, so the VBR is at
 # byte offset 512 on the whole-disk device.
@@ -76,12 +83,19 @@ class DeviceEntry:
         position: 0-based device number (matches HID bitmap bit position).
         name: Human-readable device name from the panel config.
         section: Section number (1-based) the device belongs to.
+        rf_byte0: First byte of the RF address (determines bus vs wireless).
 
     """
 
     position: int
     name: str
     section: int
+    rf_byte0: int
+
+    @property
+    def is_bus_device(self) -> bool:
+        """True if this is a wired/bus device (rf_byte0 in 0x10-0x1f)."""
+        return _RF_BUS_MIN <= self.rf_byte0 <= _RF_BUS_MAX
 
 
 @dataclass(frozen=True, slots=True)
@@ -339,11 +353,13 @@ def _parse_device_entries(data: bytes) -> list[DeviceEntry]:
                 if any(c.isalpha() for c in name) and _is_valid_name(name):
                     # Look backwards for section assignment byte.
                     section = _find_section_byte(data, i)
+                    rf_byte0 = _find_rf_byte0(data, i)
                     devices.append(
                         DeviceEntry(
                             position=len(devices),
                             name=name,
                             section=section,
+                            rf_byte0=rf_byte0,
                         )
                     )
 
@@ -408,6 +424,31 @@ def _find_section_byte(data: bytes, name_offset: int) -> int:
             return data[j + 1] + 1
 
     return 1
+
+
+def _find_rf_byte0(data: bytes, name_offset: int) -> int:
+    """
+    Find the RF address byte0 preceding a device name.
+
+    The RF address is encoded as ``88 00 ce [rf_byte0] [b1] [b2]``
+    in the record before the section/type/name tags. The byte0
+    determines whether the device is wired/bus (<= 0x1f) or
+    wireless (>= 0x20).
+
+    Args:
+        data: Full decrypted config.
+        name_offset: Offset of the 0x06 name tag.
+
+    Returns:
+        RF byte0 value. Defaults to 0x00 if not found.
+
+    """
+    search_start = max(0, name_offset - 60)
+    for j in range(name_offset - 4, search_start, -1):
+        if data[j : j + 3] == _RF_MARKER and j + 3 < len(data):
+            return data[j + 3]
+
+    return 0x00
 
 
 def _find_usb_device(hidraw_device_sysfs: Path) -> Path | None:
