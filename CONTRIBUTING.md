@@ -7,7 +7,7 @@
 3. The container will install all dependencies automatically via `scripts/setup`
 4. Run `scripts/develop` to start Home Assistant with the integration loaded
 
-**Note:** The devcontainer passes `/dev/hidraw0` into the container for live panel testing. The panel must be attached via USB (or usbip) before opening the container.
+**Note:** The devcontainer uses `--privileged` mode for USB device access. Ensure the panel's block devices are readable (`chmod a+r /dev/sdX`) before starting HA.
 
 ## Code standards
 
@@ -21,23 +21,32 @@
 
 ```
 custom_components/jablotron_local/
-  __init__.py             - Integration setup and teardown
-  alarm_control_panel.py  - Alarm control panel entities
-  client.py               - USB HID client (blocking reader thread + commands)
-  config_flow.py          - UI configuration flow (USB discovery + manual)
-  const.py                - Integration constants (domain, USB VID/PID)
-  coordinator.py          - Push-style DataUpdateCoordinator
-  data.py                 - Runtime data types
-  diagnostics.py          - Diagnostics download for bug reports
-  hidraw.py               - HID device enumeration and probing
-  protocol.py             - TLV framing and packet codec (pure, no I/O)
-  manifest.json           - Integration manifest
-  translations/           - UI strings
+  __init__.py                 - Integration setup (connect, config export, device probe)
+  alarm_control_panel.py      - Alarm control panel entities (per section)
+  binary_sensor.py            - Binary sensor entities (per device, from activity bitmap)
+  sensor.py                   - Battery, signal, voltage sensor entities
+  client.py                   - USB HID client (reader thread + authenticated commands)
+  config_flow.py              - UI configuration flow (USB discovery + manual + reauth)
+  config_reader.py            - Panel config reader (FLEXI_CFG mass storage)
+  coordinator.py              - DataUpdateCoordinator (push + periodic poll)
+  const.py                    - Integration constants (domain, USB VID/PID)
+  data.py                     - Runtime data types
+  diagnostics.py              - Diagnostics download for bug reports
+  hidraw.py                   - HID device enumeration and probing
+  protocol.py                 - TLV framing, packet codec, device status decoders
+  manifest.json               - Integration manifest
+  translations/               - UI strings
 
 tests/
-  conftest.py             - Shared fixtures
-  test_config_flow.py     - Config flow tests
-  test_protocol.py        - Protocol codec tests (pcap-verified vectors)
+  conftest.py                 - Shared fixtures
+  test_config_flow.py         - Config flow tests
+  test_config_reader.py       - Config reader/parser tests
+  test_device_status.py       - Device status/diagnostic decoder tests
+  test_protocol.py            - Protocol codec tests (pcap-verified vectors)
+  test_coordinator.py         - Coordinator tests
+  test_client.py              - Client tests
+  test_alarm_control_panel.py - Entity tests
+  test_hidraw.py              - Hidraw enumeration tests
 ```
 
 ## Testing
