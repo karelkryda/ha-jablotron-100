@@ -11,6 +11,17 @@ This module performs raw ``/dev/hidraw*`` I/O using ``os.open``,
 Linux kernel's HID subsystem. The panel expects 64-byte reports with
 a leading zero report-ID byte prepended on write.
 
+Authenticated operations
+------------------------
+Three authenticated command paths share a single ``_session_lock``
+to prevent overlapping sessions:
+
+- :meth:`modify_section` - arm/disarm a section with user PIN (~20ms).
+- :meth:`export_config` - trigger FLEXI_CFG config export (service PIN).
+  The lock is held until :meth:`end_session` is called after reading.
+- :meth:`probe_all_devices` - query device status (0x28) and bus
+  diagnostics (0x94/0x96) for battery, signal, and voltage data.
+
 Thread safety
 -------------
 - The reader thread is the only writer during monitoring (heartbeat,

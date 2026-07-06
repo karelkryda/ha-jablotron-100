@@ -24,8 +24,8 @@ MONITORING (unauthenticated, permanent)
     The panel pushes section states, device events and device-activity
     bitmaps. No PIN is ever involved.
 
-COMMAND (per arm/disarm, authenticated window ~20 ms)
-    Sequence verified against USB capture from JA-Link:
+COMMAND (authenticated, short-lived sessions)
+    Arm/disarm sequence verified against USB capture from JA-Link:
 
         80 01 01          AUTH_END  (clear stale session)
         80 <n> 03 <ascii> AUTH_CODE (prefix + pin, ASCII)
@@ -33,6 +33,18 @@ COMMAND (per arm/disarm, authenticated window ~20 ms)
         80 02 0d <byte>   MODIFY_SECTION
         ...wait for 80 1a (ACK)...
         80 01 01          AUTH_END  (logout)
+
+    Device status query (requires auth):
+
+        52 02 28 <dev>    QUERY_DEVICE_STATUS
+        ...response: 52 xx a8 <dev> [signal/battery data]...
+
+    Bus device diagnostics (requires auth):
+
+        94 02 <dev> 01    DIAGNOSTICS_START
+        96 03 <dev> 09 00 DIAGNOSTICS_FORCE_INFO
+        ...response: 90 [len] <dev> 0a [signal/battery/voltage]...
+        94 02 <dev> 00    DIAGNOSTICS_STOP
 
 Code encoding (pcap-verified)
 ------------------------------

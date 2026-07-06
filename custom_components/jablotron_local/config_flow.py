@@ -42,6 +42,8 @@ if TYPE_CHECKING:
 CONF_DEVICE_PATH = "device_path"
 CONF_SERIAL_NUMBER = "serial_number"
 CONF_SERVICE_PIN = "service_pin"
+CONF_PROBE_INTERVAL = "probe_interval"
+DEFAULT_PROBE_INTERVAL = 30  # minutes
 
 
 class JablotronLocalConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -213,6 +215,9 @@ class JablotronLocalConfigFlow(ConfigFlow, domain=DOMAIN):
                     CONF_SERIAL_NUMBER: selected.serial,
                     CONF_SERVICE_PIN: user_input.get(CONF_SERVICE_PIN, "").strip()
                     or None,
+                    CONF_PROBE_INTERVAL: user_input.get(
+                        CONF_PROBE_INTERVAL, DEFAULT_PROBE_INTERVAL
+                    ),
                 },
             )
 
@@ -228,6 +233,12 @@ class JablotronLocalConfigFlow(ConfigFlow, domain=DOMAIN):
                         CONF_SERVICE_PIN,
                         default=entry.data.get(CONF_SERVICE_PIN, ""),
                     ): str,
+                    vol.Optional(
+                        CONF_PROBE_INTERVAL,
+                        default=entry.data.get(
+                            CONF_PROBE_INTERVAL, DEFAULT_PROBE_INTERVAL
+                        ),
+                    ): int,
                 }
             ),
         )
@@ -259,6 +270,11 @@ class JablotronLocalConfigFlow(ConfigFlow, domain=DOMAIN):
                 if service_pin:
                     data[CONF_SERVICE_PIN] = service_pin
 
+                probe_interval = user_input.get(
+                    CONF_PROBE_INTERVAL, DEFAULT_PROBE_INTERVAL
+                )
+                data[CONF_PROBE_INTERVAL] = probe_interval
+
                 return self.async_create_entry(
                     title=panel.name,
                     data=data,
@@ -271,6 +287,9 @@ class JablotronLocalConfigFlow(ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema(
                 {
                     vol.Optional(CONF_SERVICE_PIN, default=""): str,
+                    vol.Optional(
+                        CONF_PROBE_INTERVAL, default=DEFAULT_PROBE_INTERVAL
+                    ): int,
                 }
             ),
             description_placeholders={

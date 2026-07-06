@@ -15,6 +15,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.jablotron_local.config_flow import (
     CONF_DEVICE_PATH,
+    CONF_PROBE_INTERVAL,
     CONF_SERIAL_NUMBER,
 )
 from custom_components.jablotron_local.const import DOMAIN
@@ -45,6 +46,7 @@ async def test_user_flow_single_panel(
     assert result["data"] == {
         CONF_DEVICE_PATH: SAMPLE_PANEL.path,
         CONF_SERIAL_NUMBER: SAMPLE_PANEL.serial,
+        CONF_PROBE_INTERVAL: 30,
     }
 
 

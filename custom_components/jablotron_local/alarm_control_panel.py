@@ -98,7 +98,7 @@ class JablotronAlarmPanel(
         self._section_number = section.number
         self._attr_unique_id = f"{entry.unique_id}_section_{section.number}"
 
-        # Use the parsed section name from FLEXI_LOG config if available.
+        # Use the parsed section name from FLEXI_CFG config if available.
         section_name = coordinator.get_section_name(section.number)
         self._attr_name = section_name or f"Section {section.number}"
 

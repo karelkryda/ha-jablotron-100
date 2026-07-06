@@ -1,25 +1,33 @@
 """
-Push-style DataUpdateCoordinator for the Jablotron Local integration.
+DataUpdateCoordinator for the Jablotron Local integration.
 
-Unlike a polling coordinator, this one has no ``update_interval``. The
-panel pushes section states, device activity, and device events via the
-USB HID reader thread in :mod:`client`. The coordinator receives decoded
-packets from the client callback and updates its :attr:`data` dict,
-notifying all subscribed entities.
+Combines push-based state updates with periodic polling:
 
-The callback is invoked from the reader thread; it uses
+- Section states and device activity are pushed by the panel via the
+  USB HID reader thread in :mod:`client`. The coordinator receives
+  decoded packets from the client callback and updates :attr:`data`,
+  notifying all subscribed entities.
+- Device status (battery, signal, voltage) is refreshed periodically
+  (configurable, default 30 min) via :meth:`_async_update_data`, which
+  re-probes all devices through the client's :meth:`probe_all_devices`.
+  Results are stored in ``data.device_infos`` (keyed by device number).
+
+The push callback is invoked from the reader thread; it uses
 ``hass.loop.call_soon_threadsafe`` to safely dispatch into HA's event
-loop.
+loop. The periodic probe only runs when a service PIN is configured.
 """
 
 import asyncio
 from dataclasses import dataclass, field
+from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
+from .client import JablotronAuthError, JablotronCommandError
 from .const import LOGGER
 from .protocol import (
+    CODE_PREFIX_WILDCARD,
     DeviceInfo,
     Packet,
     PacketType,
@@ -56,11 +64,12 @@ class PanelState:
 
 class JablotronCoordinator(DataUpdateCoordinator[PanelState]):
     """
-    Push-style coordinator for Jablotron panel state.
+    Coordinator for Jablotron panel state.
 
-    No polling - the panel pushes data via the USB HID reader thread.
-    The coordinator bridges the reader thread into HA's event loop and
-    notifies entities on every state change.
+    Combines push-based section/device-activity updates from the panel
+    with periodic device status probing (configurable interval when service
+    PIN is configured). Bridges the reader thread into HA's event loop
+    and notifies entities on every state change.
     """
 
     def __init__(
@@ -68,6 +77,8 @@ class JablotronCoordinator(DataUpdateCoordinator[PanelState]):
         hass: HomeAssistant,
         client: JablotronClient,
         panel_config: PanelConfig | None = None,
+        service_pin: str | None = None,
+        probe_interval: int = 30,
     ) -> None:
         """
         Initialize the coordinator and wire the client callbacks.
@@ -75,18 +86,23 @@ class JablotronCoordinator(DataUpdateCoordinator[PanelState]):
         Args:
             hass: Home Assistant instance.
             client: Connected :class:`JablotronClient` instance.
-            panel_config: Parsed panel configuration from FLEXI_LOG,
+            panel_config: Parsed panel configuration from FLEXI_CFG,
                 or ``None`` if not available.
+            service_pin: Service PIN for periodic device probing,
+                or ``None`` to disable periodic probes.
+            probe_interval: Interval in minutes between device probes.
 
         """
         super().__init__(
             hass,
             LOGGER,
             name="Jablotron Local",
+            update_interval=timedelta(minutes=probe_interval) if service_pin else None,
         )
         self.client = client
         self.data = PanelState()
         self.panel_config = panel_config
+        self._service_pin = service_pin
 
         # Wire callbacks - these fire from the reader thread.
         client.on_packets = self._on_packets_from_thread
@@ -113,12 +129,34 @@ class JablotronCoordinator(DataUpdateCoordinator[PanelState]):
 
     async def _async_update_data(self) -> PanelState:
         """
-        Return the current panel state (no polling).
+        Periodic update: probe device status if service PIN is configured.
 
-        Called by HA on first subscriber registration. Since we're
-        push-based, just return whatever we have.
+        Called by HA at the configured update_interval.
+        Also called on first subscriber registration.
         """
+        if (
+            self._service_pin
+            and self.panel_config
+            and self.panel_config.devices
+            and not self.client.service_pin_rejected
+        ):
+            statuses = await self.hass.async_add_executor_job(self._probe_devices)
+            if statuses:
+                self.data.device_infos = {s.device_number: s for s in statuses}
+
         return self.data
+
+    def _probe_devices(self) -> list[DeviceInfo]:
+        """Run the device probe on the executor thread."""
+        if not self._service_pin or not self.panel_config:
+            return []
+
+        try:
+            code = CODE_PREFIX_WILDCARD + self._service_pin
+            return self.client.probe_all_devices(code, self.panel_config.devices)
+        except JablotronAuthError, JablotronCommandError, OSError:
+            LOGGER.warning("Periodic device probe failed", exc_info=True)
+            return []
 
     async def async_wait_for_initial_data(self) -> None:
         """

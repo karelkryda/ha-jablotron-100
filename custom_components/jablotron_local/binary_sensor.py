@@ -2,7 +2,7 @@
 Binary sensor entities for the Jablotron Local integration.
 
 Creates one :class:`BinarySensorEntity` per device parsed from the
-panel configuration (FLEXI_LOG). State is driven by the 0xd8
+panel configuration (FLEXI_CFG). State is driven by the 0xd8
 DEVICES_STATES bitmap pushed by the panel - bit N active means the
 device at position N is currently triggered (motion detected, door
 open, flood detected, etc.).
@@ -39,7 +39,7 @@ async def async_setup_entry(
     Set up binary sensor entities from a config entry.
 
     Creates one entity per device from the panel config. If panel
-    config is not available (FLEXI_LOG not readable), no entities are
+    config is not available (FLEXI_CFG not readable), no entities are
     created.
     """
     coordinator = entry.runtime_data.coordinator

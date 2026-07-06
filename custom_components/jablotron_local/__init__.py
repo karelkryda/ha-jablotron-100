@@ -3,6 +3,18 @@ Jablotron Local integration.
 
 Local control of Jablotron JA-100+ alarm panels via USB HID,
 bypassing the Jablonet cloud entirely.
+
+Entry setup flow:
+
+1. Open the USB HID connection and start the background reader thread.
+2. Wait for initial sysinfo and section state data from the panel.
+3. If a service PIN is configured:
+   a. Export panel config from FLEXI_CFG (device/section names).
+   b. Probe all devices for status (battery, signal, voltage).
+4. Forward platform setup (alarm_control_panel, binary_sensor, sensor).
+
+The coordinator runs a periodic refresh (configurable, default 30 min)
+to re-probe device status, keeping battery and signal readings current.
 """
 
 from typing import TYPE_CHECKING
@@ -16,7 +28,12 @@ from .client import (
     JablotronCommandError,
     JablotronConnectionError,
 )
-from .config_flow import CONF_DEVICE_PATH, CONF_SERVICE_PIN
+from .config_flow import (
+    CONF_DEVICE_PATH,
+    CONF_PROBE_INTERVAL,
+    CONF_SERVICE_PIN,
+    DEFAULT_PROBE_INTERVAL,
+)
 from .config_reader import (
     ConfigReadError,
     DeviceEntry,
@@ -48,6 +65,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: JablotronConfigEntry) ->
     panel config from FLEXI_CFG (requires service PIN).
     """
     device_path = entry.data[CONF_DEVICE_PATH]
+    service_pin = entry.data.get(CONF_SERVICE_PIN)
+    probe_interval = entry.data.get(CONF_PROBE_INTERVAL, DEFAULT_PROBE_INTERVAL)
 
     client = JablotronClient(path=device_path)
     try:
@@ -56,7 +75,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: JablotronConfigEntry) ->
         msg = f"Failed to open panel at {device_path}"
         raise ConfigEntryNotReady(msg) from err
 
-    coordinator = JablotronCoordinator(hass, client)
+    coordinator = JablotronCoordinator(
+        hass,
+        client,
+        service_pin=service_pin,
+        probe_interval=probe_interval,
+    )
     await coordinator.async_config_entry_first_refresh()
 
     # Wait briefly for initial sysinfo and section data to arrive from the
@@ -65,7 +89,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: JablotronConfigEntry) ->
     await coordinator.async_wait_for_initial_data()
 
     # Read panel config and probe device status if service PIN is configured.
-    service_pin = entry.data.get(CONF_SERVICE_PIN)
     if service_pin:
         panel_config = await hass.async_add_executor_job(
             _export_and_read_config, client, device_path, service_pin
