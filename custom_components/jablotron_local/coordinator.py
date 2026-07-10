@@ -225,7 +225,7 @@ class JablotronCoordinator(DataUpdateCoordinator[PanelState]):
                 self._handle_ui_control(packet)
 
         if changed:
-            self.async_set_updated_data(self.data)
+            self.async_update_listeners()
 
         # Signal initial data ready once we have sections + model.
         if (
@@ -270,4 +270,4 @@ class JablotronCoordinator(DataUpdateCoordinator[PanelState]):
         else:
             LOGGER.warning("Panel connection lost; reconnecting")
 
-        self.async_set_updated_data(self.data)
+        self.async_update_listeners()
