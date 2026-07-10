@@ -138,7 +138,7 @@ def find_flexi_cfg_device(hidraw_path: str) -> str | None:
         The block device path (e.g. ``/dev/sda``) or ``None`` if not found.
 
     """
-    hidraw_name = Path(hidraw_path).name
+    hidraw_name = Path(hidraw_path).resolve().name
     hidraw_sysfs = Path("/sys/class/hidraw") / hidraw_name / "device"
 
     if not hidraw_sysfs.is_dir():

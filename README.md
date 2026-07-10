@@ -46,6 +46,18 @@ Copy `custom_components/jablotron_local` to your HA `config/custom_components/` 
 6. Optionally enter your service/installer PIN for device names and status probing
 7. Optionally adjust the probe interval (default 30 minutes)
 
+### Stable device path (Docker / USB/IP)
+
+The integration automatically prefers stable `/dev` symlinks over raw `/dev/hidrawN` paths. If you use udev rules to create symlinks, the integration will discover and use them - surviving kernel device number reassignments across reboots or USB/IP reattachments.
+
+Example udev rule (`/etc/udev/rules.d/99-jablotron.rules`):
+
+```
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="16d6", ATTRS{idProduct}=="0008", SYMLINK+="jablotron-hid", MODE="0666"
+```
+
+For Docker deployments, mount `/dev` into the container and ensure the cgroup rules permit access to the hidraw device major number.
+
 ## Usage
 
 Once configured, the integration creates:

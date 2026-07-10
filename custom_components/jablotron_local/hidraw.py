@@ -24,6 +24,7 @@ from pathlib import Path
 from .const import LOGGER, USB_PRODUCT_ID, USB_VENDOR_ID
 
 SYSFS_HIDRAW = Path("/sys/class/hidraw")
+DEV_PATH = Path("/dev")
 
 # HID_ID line format: BUS:VENDOR:PRODUCT (hex, zero-padded)
 _HID_ID_PARTS = 3
@@ -123,15 +124,51 @@ def enumerate_panels() -> list[DiscoveredPanel]:
         if vid != USB_VENDOR_ID or pid != USB_PRODUCT_ID:
             continue
 
+        raw_path = str(DEV_PATH / entry.name)
         panels.append(
             DiscoveredPanel(
-                path=f"/dev/{entry.name}",
+                path=_find_stable_symlink(raw_path),
                 serial=serial,
                 name=name or "Jablotron Panel",
             )
         )
 
     return panels
+
+
+def _find_stable_symlink(hidraw_path: str) -> str:
+    """
+    Find a stable /dev symlink pointing to the given hidraw device.
+
+    Scans /dev/ for a symlink whose target resolves to the same device.
+    If none exist, returns the original path unchanged.
+
+    Args:
+        hidraw_path: Raw device path, e.g. ``/dev/hidraw1``.
+
+    Returns:
+        A stable symlink path, or the original path if no symlink found.
+
+    """
+    try:
+        real_target = Path(hidraw_path).resolve()
+    except OSError:
+        return hidraw_path
+
+    try:
+        for entry in DEV_PATH.iterdir():
+            if not entry.is_symlink():
+                continue
+
+            try:
+                if entry.resolve() == real_target:
+                    return str(entry)
+            except OSError:
+                continue
+    except OSError:
+        return hidraw_path
+
+    return hidraw_path
 
 
 def probe_device(path: str) -> None:

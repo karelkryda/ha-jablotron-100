@@ -13,6 +13,7 @@ from custom_components.jablotron_local.hidraw import (
     DeviceOpenError,
     DiscoveredPanel,
     PermissionDeniedError,
+    _find_stable_symlink,
     enumerate_panels,
     probe_device,
 )
@@ -232,3 +233,126 @@ class TestProbeDevice:
             probe_device("/dev/hidraw0")
 
         assert exc_info.value.path == "/dev/hidraw0"
+
+
+# ---------------------------------------------------------------------------
+# _find_stable_symlink
+# ---------------------------------------------------------------------------
+
+
+class TestFindStableSymlink:
+    def test_returns_symlink_when_exists(self, tmp_path: Path):
+        # Create a fake hidraw device file.
+        hidraw = tmp_path / "hidraw1"
+        hidraw.touch()
+
+        # Create a symlink pointing to it.
+        symlink = tmp_path / "jablotron-hid"
+        symlink.symlink_to("hidraw1")
+
+        with patch(
+            "custom_components.jablotron_local.hidraw.DEV_PATH",
+            tmp_path,
+        ):
+            result = _find_stable_symlink(str(hidraw))
+
+        assert result == str(symlink)
+
+    def test_returns_original_when_no_symlink(self, tmp_path: Path):
+        # tmp_path has no symlinks.
+        hidraw = tmp_path / "hidraw1"
+        hidraw.touch()
+
+        with patch(
+            "custom_components.jablotron_local.hidraw.DEV_PATH",
+            tmp_path,
+        ):
+            result = _find_stable_symlink(str(hidraw))
+
+        assert result == str(hidraw)
+
+    def test_returns_original_when_dev_path_unreadable(self, tmp_path: Path):
+        nonexistent = tmp_path / "nonexistent"
+        with patch(
+            "custom_components.jablotron_local.hidraw.DEV_PATH",
+            nonexistent,
+        ):
+            result = _find_stable_symlink("/dev/hidraw0")
+
+        assert result == "/dev/hidraw0"
+
+    def test_returns_original_when_resolve_fails(self):
+        with patch(
+            "pathlib.Path.resolve",
+            side_effect=OSError("nope"),
+        ):
+            result = _find_stable_symlink("/dev/hidraw0")
+
+        assert result == "/dev/hidraw0"
+
+    def test_skips_non_symlink_entries(self, tmp_path: Path):
+        # Regular file with a tempting name - should be ignored.
+        hidraw = tmp_path / "hidraw1"
+        hidraw.touch()
+        (tmp_path / "jablotron-hid").touch()  # regular file, not symlink
+
+        with patch(
+            "custom_components.jablotron_local.hidraw.DEV_PATH",
+            tmp_path,
+        ):
+            result = _find_stable_symlink(str(hidraw))
+
+        assert result == str(hidraw)
+
+    def test_skips_symlinks_to_other_targets(self, tmp_path: Path):
+        hidraw1 = tmp_path / "hidraw1"
+        hidraw1.touch()
+        hidraw2 = tmp_path / "hidraw2"
+        hidraw2.touch()
+
+        # Symlink points to hidraw2, not hidraw1.
+        symlink = tmp_path / "jablotron-hid"
+        symlink.symlink_to("hidraw2")
+
+        with patch(
+            "custom_components.jablotron_local.hidraw.DEV_PATH",
+            tmp_path,
+        ):
+            result = _find_stable_symlink(str(hidraw1))
+
+        assert result == str(hidraw1)
+
+
+# ---------------------------------------------------------------------------
+# enumerate_panels with symlink
+# ---------------------------------------------------------------------------
+
+
+class TestEnumeratePanelsSymlink:
+    def test_uses_symlink_when_available(self, tmp_path: Path):
+        # Set up sysfs.
+        sysfs = tmp_path / "sysfs"
+        hidraw_dir = sysfs / "hidraw1" / "device"
+        hidraw_dir.mkdir(parents=True)
+        (hidraw_dir / "uevent").write_text(_JABLOTRON_UEVENT)
+
+        # Set up /dev with symlink.
+        dev = tmp_path / "dev"
+        dev.mkdir()
+        (dev / "hidraw1").touch()
+        (dev / "jablotron-hid").symlink_to("hidraw1")
+
+        with (
+            patch(
+                "custom_components.jablotron_local.hidraw.SYSFS_HIDRAW",
+                sysfs,
+            ),
+            patch(
+                "custom_components.jablotron_local.hidraw.DEV_PATH",
+                dev,
+            ),
+        ):
+            panels = enumerate_panels()
+
+        assert len(panels) == 1
+        assert panels[0].path == str(dev / "jablotron-hid")
