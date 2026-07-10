@@ -224,6 +224,13 @@ class JablotronCoordinator(DataUpdateCoordinator[PanelState]):
             elif packet.type == PacketType.UI_CONTROL:
                 self._handle_ui_control(packet)
 
+            else:
+                LOGGER.debug(
+                    "Unhandled packet type=0x%02x data=%s",
+                    packet.type,
+                    packet.data.hex() if packet.data else "",
+                )
+
         if changed:
             self.async_update_listeners()
 
