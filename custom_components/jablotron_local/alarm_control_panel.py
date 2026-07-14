@@ -49,6 +49,7 @@ _STATE_MAP: dict[SectionPrimaryState, AlarmControlPanelState] = {
 # Map panel secondary (transitional) state to HA alarm state.
 # When a secondary state is present (not NORMAL), it overrides the primary mapping.
 _SECONDARY_STATE_MAP: dict[SectionSecondaryState, AlarmControlPanelState] = {
+    SectionSecondaryState.PENDING: AlarmControlPanelState.PENDING,
     SectionSecondaryState.ARMING: AlarmControlPanelState.ARMING,
 }
 

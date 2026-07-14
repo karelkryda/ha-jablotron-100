@@ -171,29 +171,43 @@ class SectionPrimaryState(IntEnum):
     """
     Primary state of a section.
 
-    Taken from the lower 7 bits of the first byte of each 2-byte slot
-    in a :attr:`PacketType.SECTIONS` payload.
+    Taken from bits [5:0] of the first byte of each 2-byte slot in a
+    :attr:`PacketType.SECTIONS` payload.
     """
 
+    UNKNOWN = -1
+    UNSET = 0
     DISARMED = 1
     ARMED_PARTIAL = 2
     ARMED_FULL = 3
     MAINTENANCE = 4
     SERVICE = 5
     BLOCKED = 6
-    OFF = 7  # slot unused / section not configured
+    OFF = 7
+
+    @classmethod
+    def _missing_(cls, value: object) -> SectionPrimaryState:  # noqa: ARG003
+        """Return UNKNOWN for any unrecognised value."""
+        return cls.UNKNOWN
 
 
 class SectionSecondaryState(IntEnum):
     """
     Secondary (transitional) state of a section.
 
-    Derived from bit 7 (0x80) of the primary state byte in the
+    Derived from bits [7:6] of the primary state byte in the
     :attr:`PacketType.SECTIONS` payload.
     """
 
+    UNKNOWN = -1
     NORMAL = 0
-    ARMING = 1
+    PENDING = 1
+    ARMING = 2
+
+    @classmethod
+    def _missing_(cls, value: object) -> SectionSecondaryState:  # noqa: ARG003
+        """Return UNKNOWN for any unrecognised value."""
+        return cls.UNKNOWN
 
 
 class ArmMode(IntEnum):
@@ -699,12 +713,11 @@ def decode_sections(data: bytes) -> list[SectionState]:
 
     The panel sends 16 two-byte slots followed by a two-byte status
     trailer (0x00 0x94 observed). Each slot is ``primary_state, flags``.
-    Slots with primary state :attr:`SectionPrimaryState.OFF` (7) or
-    outside 1..7 (after masking bit 7) are not active sections and are
-    skipped.
+    Slots with primary state :attr:`SectionPrimaryState.OFF` (7) are
+    not active sections and are skipped.
 
-    Bit 7 (0x80) of the primary byte encodes the secondary state.
-    The bit is masked off to recover the base primary state.
+    Bits [7:6] of the primary byte encode the secondary state.
+    Bits [5:0] encode the base primary state.
 
     Args:
         data: Raw DATA bytes from the 0x51 TLV atom.
@@ -719,17 +732,20 @@ def decode_sections(data: bytes) -> list[SectionState]:
         raw_byte = data[idx]
         flags = data[idx + 1]
 
-        primary_raw = raw_byte & 0x7F
-        secondary_raw = (raw_byte & 0x80) >> 7
+        primary_raw = raw_byte & 0x3F
+        secondary_raw = (raw_byte & 0xC0) >> 6
 
-        if primary_raw not in range(1, 8) or primary_raw == SectionPrimaryState.OFF:
+        primary = SectionPrimaryState(primary_raw)
+        secondary = SectionSecondaryState(secondary_raw)
+
+        if primary in (SectionPrimaryState.UNSET, SectionPrimaryState.OFF):
             continue
 
         states.append(
             SectionState(
                 number=idx // 2 + 1,
-                primary=SectionPrimaryState(primary_raw),
-                secondary=SectionSecondaryState(secondary_raw),
+                primary=primary,
+                secondary=secondary,
                 flags=flags,
             )
         )

@@ -435,6 +435,108 @@ class TestDecodeSections:
         data = bytes([0x87, 0x00]) + bytes([0x07, 0x00] * 15) + bytes([0x00, 0x94])
         assert decode_sections(data) == []
 
+    def test_pending_bit6_masked_to_armed_full(self):
+        """0x43 = 0x40 | ARMED_FULL → entry delay (pending)."""
+        data = bytes([0x43, 0x00]) + bytes([0x07, 0x00] * 15) + bytes([0x00, 0x94])
+        states = decode_sections(data)
+        assert len(states) == 1
+        assert states[0] == SectionState(
+            1, SectionPrimaryState.ARMED_FULL, SectionSecondaryState.PENDING, 0
+        )
+
+    def test_pending_mixed_with_normal(self):
+        """Section 1 pending (0x43), section 2 disarmed, section 3 armed."""
+        data = bytes(
+            [
+                0x43,
+                0x00,  # sec 1: entry delay towards ARMED_FULL
+                0x01,
+                0x00,  # sec 2: DISARMED
+                0x03,
+                0x00,  # sec 3: ARMED_FULL
+            ]
+            + [0x07, 0x00] * 13
+            + [0x00, 0x80]
+        )
+        states = decode_sections(data)
+        assert len(states) == 3
+        assert states[0] == SectionState(
+            1, SectionPrimaryState.ARMED_FULL, SectionSecondaryState.PENDING, 0
+        )
+        assert states[1] == SectionState(
+            2, SectionPrimaryState.DISARMED, SectionSecondaryState.NORMAL, 0
+        )
+        assert states[2] == SectionState(
+            3, SectionPrimaryState.ARMED_FULL, SectionSecondaryState.NORMAL, 0
+        )
+
+    def test_unknown_secondary_does_not_crash(self):
+        """0xC3 = bits [7:6] = 3, unknown secondary. Must not crash."""
+        data = bytes([0xC3, 0x00]) + bytes([0x07, 0x00] * 15) + bytes([0x00, 0x94])
+        result = decode_sections(data)
+        assert len(result) == 1
+        assert result[0].primary == SectionPrimaryState.ARMED_FULL
+        assert result[0].secondary == SectionSecondaryState.UNKNOWN
+
+    def test_unknown_primary_does_not_crash(self):
+        """Primary value outside known range after masking. Must not crash."""
+        # 0x08 & 0x3F = 8, not a known primary → UNKNOWN, included
+        data = bytes([0x08, 0x00]) + bytes([0x07, 0x00] * 15) + bytes([0x00, 0x94])
+        result = decode_sections(data)
+        assert len(result) == 1
+        assert result[0].primary == SectionPrimaryState.UNKNOWN
+        assert result[0].secondary == SectionSecondaryState.NORMAL
+
+        # 0x00 & 0x3F = 0, UNSET → skipped (padding/trailer)
+        data = bytes([0x00, 0x00]) + bytes([0x07, 0x00] * 15) + bytes([0x00, 0x94])
+        result = decode_sections(data)
+        assert result == []
+
+        # 0x3F & 0x3F = 63, not a known primary → UNKNOWN, included
+        data = bytes([0x3F, 0x00]) + bytes([0x07, 0x00] * 15) + bytes([0x00, 0x94])
+        result = decode_sections(data)
+        assert len(result) == 1
+        assert result[0].primary == SectionPrimaryState.UNKNOWN
+
+    def test_real_capture_arm_with_exit_delay(self):
+        """
+        Real capture data: section 1 arming (0x83), section 2 disarmed,
+        section 3 armed. Then exit delay expires (0x03).
+        """
+        # During exit delay
+        arming_data = bytes.fromhex(
+            "83000100030007000700070007000700070007000700070007000700070007000090"
+        )
+        states = decode_sections(arming_data)
+        assert len(states) == 3
+        assert states[0].primary == SectionPrimaryState.ARMED_FULL
+        assert states[0].secondary == SectionSecondaryState.ARMING
+        assert states[1].primary == SectionPrimaryState.DISARMED
+        assert states[1].secondary == SectionSecondaryState.NORMAL
+        assert states[2].primary == SectionPrimaryState.ARMED_FULL
+        assert states[2].secondary == SectionSecondaryState.NORMAL
+
+        # After exit delay expires
+        armed_data = bytes.fromhex(
+            "03000100030007000700070007000700070007000700070007000700070007000080"
+        )
+        states = decode_sections(armed_data)
+        assert states[0].primary == SectionPrimaryState.ARMED_FULL
+        assert states[0].secondary == SectionSecondaryState.NORMAL
+
+    def test_real_capture_entry_delay(self):
+        """
+        Real capture data: section 1 in entry delay (0x43), section 2
+        disarmed, section 3 armed.
+        """
+        pending_data = bytes.fromhex(
+            "43000100030007000700070007000700070007000700070007000700070007000080"
+        )
+        states = decode_sections(pending_data)
+        assert len(states) == 3
+        assert states[0].primary == SectionPrimaryState.ARMED_FULL
+        assert states[0].secondary == SectionSecondaryState.PENDING
+
 
 class TestDecodeDevicesStates:
     def test_no_active_devices(self):

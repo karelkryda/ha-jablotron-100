@@ -100,19 +100,19 @@ class TestSectionsUpdate:
             number=1,
             primary=SectionPrimaryState.DISARMED,
             secondary=SectionSecondaryState.NORMAL,
-            flags=0
+            flags=0,
         )
         assert coordinator.data.sections[1] == SectionState(
             number=2,
             primary=SectionPrimaryState.ARMED_FULL,
             secondary=SectionSecondaryState.NORMAL,
-            flags=0
+            flags=0,
         )
         assert coordinator.data.sections[2] == SectionState(
             number=3,
             primary=SectionPrimaryState.ARMED_PARTIAL,
             secondary=SectionSecondaryState.NORMAL,
-            flags=0
+            flags=0,
         )
 
     async def test_sections_update_notifies_entities(self, hass: HomeAssistant):
@@ -190,6 +190,95 @@ class TestSectionsUpdate:
         coordinator._process_packets([packet2])
 
         callback.assert_called()
+
+    async def test_pending_section_parsed(self, hass: HomeAssistant):
+        """0x43 (bit 6 set) during entry delay is parsed as PENDING."""
+        coordinator = _make_coordinator(hass)
+        packet = _sections_packet([(0x43, 0x00), (SectionPrimaryState.DISARMED, 0x00)])
+
+        coordinator._process_packets([packet])
+
+        assert len(coordinator.data.sections) == 2
+        assert coordinator.data.sections[0] == SectionState(
+            number=1,
+            primary=SectionPrimaryState.ARMED_FULL,
+            secondary=SectionSecondaryState.PENDING,
+            flags=0,
+        )
+        assert coordinator.data.sections[1] == SectionState(
+            number=2,
+            primary=SectionPrimaryState.DISARMED,
+            secondary=SectionSecondaryState.NORMAL,
+            flags=0,
+        )
+
+    async def test_pending_to_disarmed_notifies(self, hass: HomeAssistant):
+        """Transition from PENDING to DISARMED triggers listener notification."""
+        coordinator = _make_coordinator(hass)
+        packet1 = _sections_packet([(0x43, 0x00)])
+        coordinator._process_packets([packet1])
+
+        callback = MagicMock()
+        coordinator.async_add_listener(callback)
+
+        packet2 = _sections_packet([(SectionPrimaryState.DISARMED, 0x00)])
+        coordinator._process_packets([packet2])
+
+        callback.assert_called()
+
+    async def test_unknown_secondary_does_not_crash(self, hass: HomeAssistant):
+        """0xC3 (secondary_raw=3, unknown) must not crash the coordinator."""
+        coordinator = _make_coordinator(hass)
+        # 0xC3 = bits[7:6]=3 (unknown), bits[5:0]=3 (ARMED_FULL)
+        packet = _sections_packet([(0xC3, 0x00)])
+
+        coordinator._process_packets([packet])
+
+        assert len(coordinator.data.sections) == 1
+        assert coordinator.data.sections[0].primary == SectionPrimaryState.ARMED_FULL
+        assert coordinator.data.sections[0].secondary == SectionSecondaryState.UNKNOWN
+
+    async def test_full_section_lifecycle(self, hass: HomeAssistant):
+        """Full lifecycle: disarmed → arming → armed → pending → disarmed."""
+        coordinator = _make_coordinator(hass)
+        callback = MagicMock()
+
+        # Start disarmed
+        coordinator._process_packets(
+            [_sections_packet([(SectionPrimaryState.DISARMED, 0x00)])]
+        )
+        assert coordinator.data.sections[0].primary == SectionPrimaryState.DISARMED
+        assert coordinator.data.sections[0].secondary == SectionSecondaryState.NORMAL
+
+        coordinator.async_add_listener(callback)
+
+        # Arm command → exit delay (0x83)
+        coordinator._process_packets([_sections_packet([(0x83, 0x00)])])
+        assert coordinator.data.sections[0].primary == SectionPrimaryState.ARMED_FULL
+        assert coordinator.data.sections[0].secondary == SectionSecondaryState.ARMING
+        assert callback.call_count == 1
+
+        # Exit delay expires → armed (0x03)
+        coordinator._process_packets(
+            [_sections_packet([(SectionPrimaryState.ARMED_FULL, 0x00)])]
+        )
+        assert coordinator.data.sections[0].primary == SectionPrimaryState.ARMED_FULL
+        assert coordinator.data.sections[0].secondary == SectionSecondaryState.NORMAL
+        assert callback.call_count == 2
+
+        # Intrusion → entry delay (0x43)
+        coordinator._process_packets([_sections_packet([(0x43, 0x00)])])
+        assert coordinator.data.sections[0].primary == SectionPrimaryState.ARMED_FULL
+        assert coordinator.data.sections[0].secondary == SectionSecondaryState.PENDING
+        assert callback.call_count == 3
+
+        # User disarms (0x01)
+        coordinator._process_packets(
+            [_sections_packet([(SectionPrimaryState.DISARMED, 0x00)])]
+        )
+        assert coordinator.data.sections[0].primary == SectionPrimaryState.DISARMED
+        assert coordinator.data.sections[0].secondary == SectionSecondaryState.NORMAL
+        assert callback.call_count == 4
 
 
 # ---------------------------------------------------------------------------

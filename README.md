@@ -11,6 +11,7 @@ Local control of Jablotron JA-100+ alarm panels via USB HID - no cloud, no Jablo
 - Per-user PIN attribution for arm/disarm commands
 - Alarm control panel entities per active section (with real section names)
 - Exit delay (arming) state shown during arm countdown
+- Entry delay (pending) state shown when alarm is about to trigger
 - Binary sensor entities for all devices (motion, door, smoke, flood, etc.)
 - Battery and signal strength sensors for wireless devices
 - Battery voltage sensors for sirens
