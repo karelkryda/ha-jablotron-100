@@ -51,6 +51,7 @@ _STATE_MAP: dict[SectionPrimaryState, AlarmControlPanelState] = {
 _SECONDARY_STATE_MAP: dict[SectionSecondaryState, AlarmControlPanelState] = {
     SectionSecondaryState.PENDING: AlarmControlPanelState.PENDING,
     SectionSecondaryState.ARMING: AlarmControlPanelState.ARMING,
+    SectionSecondaryState.TRIGGERED: AlarmControlPanelState.TRIGGERED,
 }
 
 

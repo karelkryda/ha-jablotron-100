@@ -226,17 +226,16 @@ class TestSectionsUpdate:
 
         callback.assert_called()
 
-    async def test_unknown_secondary_does_not_crash(self, hass: HomeAssistant):
-        """0xC3 (secondary_raw=3, unknown) must not crash the coordinator."""
+    async def test_triggered_section_parsed(self, hass: HomeAssistant):
+        """0x1B (bits 4+3 set, primary=3) is parsed as TRIGGERED."""
         coordinator = _make_coordinator(hass)
-        # 0xC3 = bits[7:6]=3 (unknown), bits[5:0]=3 (ARMED_FULL)
-        packet = _sections_packet([(0xC3, 0x00)])
+        packet = _sections_packet([(0x1B, 0x00)])
 
         coordinator._process_packets([packet])
 
         assert len(coordinator.data.sections) == 1
         assert coordinator.data.sections[0].primary == SectionPrimaryState.ARMED_FULL
-        assert coordinator.data.sections[0].secondary == SectionSecondaryState.UNKNOWN
+        assert coordinator.data.sections[0].secondary == SectionSecondaryState.TRIGGERED
 
     async def test_full_section_lifecycle(self, hass: HomeAssistant):
         """Full lifecycle: disarmed → arming → armed → pending → disarmed."""

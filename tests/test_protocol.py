@@ -470,33 +470,55 @@ class TestDecodeSections:
             3, SectionPrimaryState.ARMED_FULL, SectionSecondaryState.NORMAL, 0
         )
 
-    def test_unknown_secondary_does_not_crash(self):
-        """0xC3 = bits [7:6] = 3, unknown secondary. Must not crash."""
+    def test_triggered_bits_3_4(self):
+        """0x1B = bits 4+3 set + primary 3 (ARMED_FULL) → TRIGGERED."""
+        data = bytes([0x1B, 0x00]) + bytes([0x07, 0x00] * 15) + bytes([0x00, 0x94])
+        result = decode_sections(data)
+        assert len(result) == 1
+        assert result[0].primary == SectionPrimaryState.ARMED_FULL
+        assert result[0].secondary == SectionSecondaryState.TRIGGERED
+
+    def test_triggered_priority_over_pending(self):
+        """
+        When both TRIGGERED (bits 4+3) and PENDING (bit 6)
+        are set, TRIGGERED wins.
+        """
+        # 0x5B = 0b01011011: bit 6 + bits 4+3 + primary 3
+        data = bytes([0x5B, 0x00]) + bytes([0x07, 0x00] * 15) + bytes([0x00, 0x94])
+        result = decode_sections(data)
+        assert len(result) == 1
+        assert result[0].secondary == SectionSecondaryState.TRIGGERED
+
+    def test_multiple_flags_highest_priority_wins(self):
+        """
+        0xC3 = bits 7+6 set. PENDING (bit 6) has higher
+        priority than ARMING (bit 7).
+        """
         data = bytes([0xC3, 0x00]) + bytes([0x07, 0x00] * 15) + bytes([0x00, 0x94])
         result = decode_sections(data)
         assert len(result) == 1
         assert result[0].primary == SectionPrimaryState.ARMED_FULL
-        assert result[0].secondary == SectionSecondaryState.UNKNOWN
+        assert result[0].secondary == SectionSecondaryState.PENDING
 
-    def test_unknown_primary_does_not_crash(self):
-        """Primary value outside known range after masking. Must not crash."""
-        # 0x08 & 0x3F = 8, not a known primary → UNKNOWN, included
+    def test_unset_primary_skipped(self):
+        """Primary value 0 (UNSET) is skipped regardless of flag bits."""
+        # 0x08 & 0x07 = 0 (UNSET), bit 3 set (triggered flag) - still skipped
         data = bytes([0x08, 0x00]) + bytes([0x07, 0x00] * 15) + bytes([0x00, 0x94])
         result = decode_sections(data)
-        assert len(result) == 1
-        assert result[0].primary == SectionPrimaryState.UNKNOWN
-        assert result[0].secondary == SectionSecondaryState.NORMAL
+        assert result == []
 
-        # 0x00 & 0x3F = 0, UNSET → skipped (padding/trailer)
+        # 0x00 - plain UNSET
         data = bytes([0x00, 0x00]) + bytes([0x07, 0x00] * 15) + bytes([0x00, 0x94])
         result = decode_sections(data)
         assert result == []
 
-        # 0x3F & 0x3F = 63, not a known primary → UNKNOWN, included
-        data = bytes([0x3F, 0x00]) + bytes([0x07, 0x00] * 15) + bytes([0x00, 0x94])
+    def test_flag_bits_do_not_affect_primary(self):
+        """Flag bits (7,6,5,4,3) don't bleed into 3-bit primary."""
+        # 0xFB = all flag bits set + primary 3 (ARMED_FULL)
+        data = bytes([0xFB, 0x00]) + bytes([0x07, 0x00] * 15) + bytes([0x00, 0x94])
         result = decode_sections(data)
         assert len(result) == 1
-        assert result[0].primary == SectionPrimaryState.UNKNOWN
+        assert result[0].primary == SectionPrimaryState.ARMED_FULL
 
     def test_real_capture_arm_with_exit_delay(self):
         """
@@ -536,6 +558,30 @@ class TestDecodeSections:
         assert len(states) == 3
         assert states[0].primary == SectionPrimaryState.ARMED_FULL
         assert states[0].secondary == SectionSecondaryState.PENDING
+
+
+class TestSectionStateEnumSafety:
+    """Verify _missing_ fallback prevents crashes on unknown enum values."""
+
+    def test_primary_unknown_value_returns_unknown(self):
+        assert SectionPrimaryState(99) == SectionPrimaryState.UNKNOWN
+
+    def test_primary_negative_value_returns_unknown(self):
+        assert SectionPrimaryState(-5) == SectionPrimaryState.UNKNOWN
+
+    def test_primary_known_values_still_work(self):
+        assert SectionPrimaryState(1) == SectionPrimaryState.DISARMED
+        assert SectionPrimaryState(3) == SectionPrimaryState.ARMED_FULL
+        assert SectionPrimaryState(7) == SectionPrimaryState.OFF
+
+    def test_secondary_unknown_value_returns_unknown(self):
+        assert SectionSecondaryState(99) == SectionSecondaryState.UNKNOWN
+
+    def test_secondary_known_values_still_work(self):
+        assert SectionSecondaryState(0) == SectionSecondaryState.NORMAL
+        assert SectionSecondaryState(1) == SectionSecondaryState.PENDING
+        assert SectionSecondaryState(2) == SectionSecondaryState.ARMING
+        assert SectionSecondaryState(3) == SectionSecondaryState.TRIGGERED
 
 
 class TestDecodeDevicesStates:

@@ -171,7 +171,7 @@ class SectionPrimaryState(IntEnum):
     """
     Primary state of a section.
 
-    Taken from bits [5:0] of the first byte of each 2-byte slot in a
+    Taken from bits [2:0] of the first byte of each 2-byte slot in a
     :attr:`PacketType.SECTIONS` payload.
     """
 
@@ -195,14 +195,16 @@ class SectionSecondaryState(IntEnum):
     """
     Secondary (transitional) state of a section.
 
-    Derived from bits [7:6] of the primary state byte in the
-    :attr:`PacketType.SECTIONS` payload.
+    Derived from flag bits of the primary state byte in the
+    :attr:`PacketType.SECTIONS` payload. When multiple flags are set,
+    the highest-priority state is selected via :data:`_SECONDARY_FLAGS`.
     """
 
     UNKNOWN = -1
     NORMAL = 0
     PENDING = 1
     ARMING = 2
+    TRIGGERED = 3
 
     @classmethod
     def _missing_(cls, value: object) -> SectionSecondaryState:  # noqa: ARG003
@@ -706,18 +708,34 @@ _MIN_BITMAP_BYTES: int = 2
 # Minimum bytes for a status packet (subtype + reason)
 _MIN_STATUS_BYTES: int = 2
 
+# Priority-ordered flag masks for deriving secondary state from byte 1.
+# First match wins. Checked in descending priority order.
+_SECONDARY_FLAGS: tuple[tuple[int, SectionSecondaryState], ...] = (
+    (0x18, SectionSecondaryState.TRIGGERED),  # bits 4+3
+    (0x40, SectionSecondaryState.PENDING),  # bit 6
+    (0x80, SectionSecondaryState.ARMING),  # bit 7
+)
+
 
 def decode_sections(data: bytes) -> list[SectionState]:
     """
     Decode the payload of a :attr:`PacketType.SECTIONS` (0x51) packet.
 
-    The panel sends 16 two-byte slots followed by a two-byte status
-    trailer (0x00 0x94 observed). Each slot is ``primary_state, flags``.
-    Slots with primary state :attr:`SectionPrimaryState.OFF` (7) are
-    not active sections and are skipped.
+    The panel sends two-byte slots followed by a trailer. Each slot
+    encodes one section as a single state byte + flags byte.
 
-    Bits [7:6] of the primary byte encode the secondary state.
-    Bits [5:0] encode the base primary state.
+    State byte layout::
+
+        bit 7:      arming (exit delay)
+        bit 6:      pending (entry delay)
+        bits 4+3:   triggered
+        bits [2:0]: primary state (see :class:`SectionPrimaryState`)
+
+    Secondary state is derived from flag bits via :data:`_SECONDARY_FLAGS`
+    priority table. Primary state uses bits [2:0].
+
+    Slots with primary :attr:`SectionPrimaryState.OFF` or
+    :attr:`SectionPrimaryState.UNSET` are skipped (not active sections).
 
     Args:
         data: Raw DATA bytes from the 0x51 TLV atom.
@@ -732,11 +750,12 @@ def decode_sections(data: bytes) -> list[SectionState]:
         raw_byte = data[idx]
         flags = data[idx + 1]
 
-        primary_raw = raw_byte & 0x3F
-        secondary_raw = (raw_byte & 0xC0) >> 6
-
-        primary = SectionPrimaryState(primary_raw)
-        secondary = SectionSecondaryState(secondary_raw)
+        primary = SectionPrimaryState(raw_byte & 0x07)
+        secondary = SectionSecondaryState.NORMAL
+        for mask, state in _SECONDARY_FLAGS:
+            if raw_byte & mask:
+                secondary = state
+                break
 
         if primary in (SectionPrimaryState.UNSET, SectionPrimaryState.OFF):
             continue

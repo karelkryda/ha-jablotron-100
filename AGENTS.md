@@ -53,19 +53,20 @@ Home Assistant custom integration for local control of Jablotron JA-100+ alarm p
 
 ## Packet Types
 
-| Type | Name              | Direction | Notes                                                             |
-| ---- | ----------------- | --------- | ----------------------------------------------------------------- |
-| 0x80 | UI_CONTROL        | Both      | Auth, modify section, PG, status/NAK                              |
-| 0x52 | COMMAND           | Both      | Heartbeat, get-state, device status                               |
-| 0x51 | SECTIONS_STATES   | IN        | 2 bytes/section (bits[7:6]=secondary + bits[5:0]=primary + flags) |
-| 0x40 | SYS_INFO          | IN        | Model/hw/fw/regcode/mac/name                                      |
-| 0x55 | DEVICE_STATE      | IN        | Individual device events                                          |
-| 0xd8 | DEVICES_STATES    | IN        | Activity bitmap (little-endian)                                   |
-| 0x30 | GET_SYS_INFO      | OUT       | Query: 30 01 <infotype>                                           |
-| 0x90 | DEVICE_INFO       | IN        | Bus diagnostics response                                          |
-| 0x94 | DIAGNOSTICS       | OUT       | Start/stop bus device diagnostics                                 |
-| 0x96 | DIAGNOSTICS_CMD   | OUT       | Force info report from bus device                                 |
-| 0x50 | PG_OUTPUTS_STATES | IN        | PG output states                                                  |
+| Type | Name              | Direction | Notes                                                                       |
+| ---- | ----------------- | --------- | --------------------------------------------------------------------------- |
+| 0x80 | UI_CONTROL        | Both      | Auth, modify section, PG, status/NAK                                        |
+| 0x52 | COMMAND           | Both      | Heartbeat, get-state, device status                                         |
+| 0x51 | SECTIONS_STATES   | IN        | 2 bytes/section (bits[7:6:4:3]=secondary flags + bits[2:0]=primary + flags) |
+| 0x40 | SYS_INFO          | IN        | Model/hw/fw/regcode/mac/name                                                |
+| 0x55 | DEVICE_STATE      | IN        | Individual device events                                                    |
+| 0xd8 | DEVICES_STATES    | IN        | Activity bitmap (little-endian)                                             |
+| 0x30 | GET_SYS_INFO      | OUT       | Query: 30 01 <infotype>                                                     |
+| 0x90 | DEVICE_INFO       | IN        | Bus diagnostics response                                                    |
+| 0x94 | DIAGNOSTICS       | OUT       | Start/stop bus device diagnostics                                           |
+| 0x96 | DIAGNOSTICS_CMD   | OUT       | Force info report from bus device                                           |
+| 0x50 | PG_OUTPUTS_STATES | IN        | PG output states                                                            |
+| 0x5f | (unknown)         | IN        | Observed during alarm trigger, data=00000000                                |
 
 ## Command Choreography (pcap-verified)
 
@@ -96,6 +97,7 @@ Proven (pcap-verified + hardware-tested):
 - Section state push on external change (instant)
 - Section secondary state: bit 7 (0x80) of primary byte = ARMING (~30s exit delay observed)
 - Section secondary state: bit 6 (0x40) of primary byte = PENDING (entry delay observed)
+- Section secondary state: bits 4+3 (0x18) of primary byte = TRIGGERED (alarm firing observed)
 - Device activity bitmap (0xd8, little-endian)
 - Code encoding: "999" + 4-digit code (ASCII) - pcap-verified
 - MODIFY_SECTION section 2: arm=0xa1, disarm=0x91 - pcap-verified
@@ -112,7 +114,7 @@ Needs service window verification:
 
 - MODIFY bytes for sections 1 and 3 (formula: 0x9f+N arm, 0x8f+N disarm)
 - ARM_HOME/ARM_NIGHT command bytes (formula: 0xaf+section)
-- 0x51 flag byte for TRIGGERED states
+- 0x51 flag byte for TRIGGERED states (byte 2 bits 3+2, kukulich OR's with byte 1)
 - Signal strength formula for 0xa8 responses (values change but % mapping unconfirmed)
 - GET_DEVICE_STATUS (0x0a) unauthenticated access
 
