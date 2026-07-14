@@ -4,9 +4,12 @@
 
 Local control of Jablotron JA-100+ alarm panels via USB HID - no cloud, no Jablonet dependency.
 
+> [!IMPORTANT]
+> This is a personal project built for my own Jablotron panel. I'm sharing it publicly in case it helps someone else, but please keep in mind that I can't guarantee it will work with your setup. I won't necessarily respond to issues or feature requests, and I only plan to extend the integration as far as my own needs go. If it works for you - awesome! If not - feel free to fork it and make it your own.
+
 ## Features
 
-- Direct local communication over USB HID (panel's J-Link/F-Link port)
+- Direct local communication over USB HID (panel's JA-Link/F-Link port)
 - Unauthenticated push-based state monitoring (sections, devices)
 - Per-user PIN attribution for arm/disarm commands
 - Alarm control panel entities per active section (with real section names)
@@ -25,7 +28,7 @@ Local control of Jablotron JA-100+ alarm panels via USB HID - no cloud, no Jablo
 
 - Jablotron JA-100+ panel (JA-101K, JA-103K, JA-106K, etc.)
 - USB connection from the panel to the Home Assistant host
-- J-Link / F-Link software must be closed (exclusive HID access)
+- JA-Link / F-Link software must be closed (exclusive HID access)
 
 ## Installation
 
@@ -42,7 +45,7 @@ Copy `custom_components/jablotron_local` to your HA `config/custom_components/` 
 ## Configuration
 
 1. Connect the panel's USB cable to your Home Assistant host
-2. Close J-Link / F-Link if running
+2. Close JA-Link / F-Link if running
 3. Go to Settings > Devices & Services > Add Integration
 4. Search for "Jablotron Local"
 5. The integration will auto-detect the panel on USB

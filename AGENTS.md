@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Home Assistant custom integration for local control of Jablotron JA-100+ alarm panels via USB HID. Bypasses Jablonet cloud entirely using the panel's J-Link/F-Link USB port with raw Linux hidraw I/O (no native dependencies).
+Home Assistant custom integration for local control of Jablotron JA-100+ alarm panels via USB HID. Bypasses Jablonet cloud entirely using the panel's JA-Link/F-Link USB port with raw Linux hidraw I/O (no native dependencies).
 
 ## Architecture
 
@@ -25,7 +25,7 @@ Home Assistant custom integration for local control of Jablotron JA-100+ alarm p
 - Framing: TLV - TYPE(1) | LEN(1) | DATA(LEN), concatenated and zero-padded to 64 bytes
 - Multiple packets per report are common
 - Device: VID 0x16D6 (Jablotron), PID 0x0008
-- Linux path: /dev/hidraw\* (exclusive access - J-Link/F-Link must be closed)
+- Linux path: /dev/hidraw\* (exclusive access - JA-Link/F-Link must be closed)
 - Raw fd I/O via os.open/read/write (no hidapi dependency)
 
 ## Key Design Decisions
