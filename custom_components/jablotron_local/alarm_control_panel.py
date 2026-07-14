@@ -22,7 +22,13 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .client import JablotronAuthError, JablotronCommandError
 from .const import DOMAIN
 from .coordinator import JablotronCoordinator, PanelState
-from .protocol import CODE_PREFIX_WILDCARD, ArmMode, SectionPrimaryState, SectionState
+from .protocol import (
+    CODE_PREFIX_WILDCARD,
+    ArmMode,
+    SectionPrimaryState,
+    SectionSecondaryState,
+    SectionState,
+)
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -39,6 +45,33 @@ _STATE_MAP: dict[SectionPrimaryState, AlarmControlPanelState] = {
     SectionPrimaryState.SERVICE: AlarmControlPanelState.DISARMED,
     SectionPrimaryState.BLOCKED: AlarmControlPanelState.DISARMED,
 }
+
+# Map panel secondary (transitional) state to HA alarm state.
+# When a secondary state is present (not NORMAL), it overrides the primary mapping.
+_SECONDARY_STATE_MAP: dict[SectionSecondaryState, AlarmControlPanelState] = {
+    SectionSecondaryState.ARMING: AlarmControlPanelState.ARMING,
+}
+
+
+def _map_alarm_state(section: SectionState) -> AlarmControlPanelState | None:
+    """
+    Map a panel section state to an HA alarm control panel state.
+
+    Secondary (transitional) states take priority over the primary
+    state when present. Falls back to :data:`_STATE_MAP` when the
+    secondary state is NORMAL.
+
+    Args:
+        section: The decoded section state from the panel.
+
+    Returns:
+        The corresponding HA alarm state, or ``None`` if unmapped.
+
+    """
+    if section.secondary != SectionSecondaryState.NORMAL:
+        return _SECONDARY_STATE_MAP.get(section.secondary)
+
+    return _STATE_MAP.get(section.primary)
 
 
 async def async_setup_entry(
@@ -103,13 +136,13 @@ class JablotronAlarmPanel(
         self._attr_name = section_name or f"Section {section.number}"
 
         self._attr_device_info = _device_info(coordinator, entry)
-        self._attr_alarm_state = _STATE_MAP.get(section.primary)
+        self._attr_alarm_state = _map_alarm_state(section)
 
     def _handle_coordinator_update(self) -> None:
         """Update _attr_alarm_state from coordinator data, then write state."""
         section = self._find_section()
         if section is not None:
-            self._attr_alarm_state = _STATE_MAP.get(section.primary)
+            self._attr_alarm_state = _map_alarm_state(section)
 
         self.async_write_ha_state()
 

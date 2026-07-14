@@ -11,6 +11,7 @@ from custom_components.jablotron_local.protocol import (
     Packet,
     PacketType,
     SectionPrimaryState,
+    SectionSecondaryState,
     SectionState,
     SysInfoType,
     UiControl,
@@ -96,13 +97,22 @@ class TestSectionsUpdate:
 
         assert len(coordinator.data.sections) == 3
         assert coordinator.data.sections[0] == SectionState(
-            number=1, primary=SectionPrimaryState.DISARMED, flags=0
+            number=1,
+            primary=SectionPrimaryState.DISARMED,
+            secondary=SectionSecondaryState.NORMAL,
+            flags=0
         )
         assert coordinator.data.sections[1] == SectionState(
-            number=2, primary=SectionPrimaryState.ARMED_FULL, flags=0
+            number=2,
+            primary=SectionPrimaryState.ARMED_FULL,
+            secondary=SectionSecondaryState.NORMAL,
+            flags=0
         )
         assert coordinator.data.sections[2] == SectionState(
-            number=3, primary=SectionPrimaryState.ARMED_PARTIAL, flags=0
+            number=3,
+            primary=SectionPrimaryState.ARMED_PARTIAL,
+            secondary=SectionSecondaryState.NORMAL,
+            flags=0
         )
 
     async def test_sections_update_notifies_entities(self, hass: HomeAssistant):
@@ -139,6 +149,43 @@ class TestSectionsUpdate:
         callback = MagicMock()
         coordinator.async_add_listener(callback)
 
+        packet2 = _sections_packet([(SectionPrimaryState.ARMED_FULL, 0x00)])
+        coordinator._process_packets([packet2])
+
+        callback.assert_called()
+
+    async def test_arming_section_parsed(self, hass: HomeAssistant):
+        """0x83 (bit 7 set) during exit delay is parsed as ARMING."""
+        coordinator = _make_coordinator(hass)
+        # Raw 0x83 byte - panel sends this during exit delay
+        packet = _sections_packet([(0x83, 0x00), (SectionPrimaryState.DISARMED, 0x00)])
+
+        coordinator._process_packets([packet])
+
+        assert len(coordinator.data.sections) == 2
+        assert coordinator.data.sections[0] == SectionState(
+            number=1,
+            primary=SectionPrimaryState.ARMED_FULL,
+            secondary=SectionSecondaryState.ARMING,
+            flags=0,
+        )
+        assert coordinator.data.sections[1] == SectionState(
+            number=2,
+            primary=SectionPrimaryState.DISARMED,
+            secondary=SectionSecondaryState.NORMAL,
+            flags=0,
+        )
+
+    async def test_arming_to_armed_transition_notifies(self, hass: HomeAssistant):
+        """Transition from ARMING to ARMED triggers listener notification."""
+        coordinator = _make_coordinator(hass)
+        packet1 = _sections_packet([(0x83, 0x00)])
+        coordinator._process_packets([packet1])
+
+        callback = MagicMock()
+        coordinator.async_add_listener(callback)
+
+        # Exit delay expires - normal ARMED_FULL
         packet2 = _sections_packet([(SectionPrimaryState.ARMED_FULL, 0x00)])
         coordinator._process_packets([packet2])
 

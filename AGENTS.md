@@ -6,12 +6,12 @@ Home Assistant custom integration for local control of Jablotron JA-100+ alarm p
 
 ## Architecture
 
-- `protocol.py` - TLV framing codec. Builds/splits 64-byte HID reports, packet constants (IntEnum), encode/decode helpers, dataclasses for parsed data (DeviceStatus, DeviceDiagnostic, DeviceInfo). Includes device status query (52 02 28), bus diagnostics (94/96), and response decoders. Pure functions, zero I/O. Fully unit-tested.
+- `protocol.py` - TLV framing codec. Builds/splits 64-byte HID reports, packet constants (IntEnum), encode/decode helpers, dataclasses for parsed data (DeviceStatus, DeviceDiagnostic, DeviceInfo, SectionState with primary/secondary states). Includes device status query (52 02 28), bus diagnostics (94/96), and response decoders. Pure functions, zero I/O. Fully unit-tested.
 - `hidraw.py` - Low-level device infrastructure. Enumerates panels via sysfs, probes device accessibility (permissions, exclusive access). Prefers stable /dev symlinks over raw /dev/hidrawN paths when udev rules create them. Used by config_flow.
 - `config_reader.py` - Panel configuration reader via FLEXI_CFG mass storage. Discovers block device via sysfs (same USB parent), reads sectors after authenticated export trigger, XOR 0xFF decrypts, parses section names and device entries (name, section, rf_byte0). Resolves symlinks for sysfs lookup.
 - `client.py` - Blocking USB HID client. Background reader thread runs unauthenticated monitoring loop (heartbeat + enable device states). Three authenticated command paths serialized by `_session_lock`: `modify_section` (arm/disarm), `export_config` (trigger FLEXI_CFG write), `probe_all_devices` (query status + diagnostics). Called via `async_add_executor_job`.
 - `coordinator.py` - DataUpdateCoordinator combining push and poll. Section states and device activity pushed by panel via reader thread. Device status (battery, signal, voltage) polled at configurable interval (default 30 min) via `_async_update_data`. Triggers reauth on unexpected WRONG_CODE. Logs unhandled packet types at DEBUG level for protocol discovery.
-- `alarm_control_panel.py` - AlarmControlPanelEntity per active section. State from 0x51 push. Section names from panel config. Arm/disarm via per-user PIN.
+- `alarm_control_panel.py` - AlarmControlPanelEntity per active section. State from 0x51 push (primary + secondary mapped to HA states). Section names from panel config. Arm/disarm via per-user PIN.
 - `binary_sensor.py` - BinarySensorEntity per device. State from 0xd8 activity bitmap. Device names from panel config.
 - `sensor.py` - Battery (%), signal (%), and voltage (V) sensors per device. Data from DeviceInfo populated by startup probe and periodic refresh.
 - `config_flow.py` - USB auto-discovery + manual sysfs enumeration + reconfigure + reauth flows. Probes device before entry creation. Accepts optional service PIN and probe interval.
@@ -53,19 +53,19 @@ Home Assistant custom integration for local control of Jablotron JA-100+ alarm p
 
 ## Packet Types
 
-| Type | Name              | Direction | Notes                                |
-| ---- | ----------------- | --------- | ------------------------------------ |
-| 0x80 | UI_CONTROL        | Both      | Auth, modify section, PG, status/NAK |
-| 0x52 | COMMAND           | Both      | Heartbeat, get-state, device status  |
-| 0x51 | SECTIONS_STATES   | IN        | 2 bytes/section (primary + flags)    |
-| 0x40 | SYS_INFO          | IN        | Model/hw/fw/regcode/mac/name         |
-| 0x55 | DEVICE_STATE      | IN        | Individual device events             |
-| 0xd8 | DEVICES_STATES    | IN        | Activity bitmap (little-endian)      |
-| 0x30 | GET_SYS_INFO      | OUT       | Query: 30 01 <infotype>              |
-| 0x90 | DEVICE_INFO       | IN        | Bus diagnostics response             |
-| 0x94 | DIAGNOSTICS       | OUT       | Start/stop bus device diagnostics    |
-| 0x96 | DIAGNOSTICS_CMD   | OUT       | Force info report from bus device    |
-| 0x50 | PG_OUTPUTS_STATES | IN        | PG output states                     |
+| Type | Name              | Direction | Notes                                                         |
+| ---- | ----------------- | --------- | ------------------------------------------------------------- |
+| 0x80 | UI_CONTROL        | Both      | Auth, modify section, PG, status/NAK                          |
+| 0x52 | COMMAND           | Both      | Heartbeat, get-state, device status                           |
+| 0x51 | SECTIONS_STATES   | IN        | 2 bytes/section (primary[7]=secondary + primary[6:0] + flags) |
+| 0x40 | SYS_INFO          | IN        | Model/hw/fw/regcode/mac/name                                  |
+| 0x55 | DEVICE_STATE      | IN        | Individual device events                                      |
+| 0xd8 | DEVICES_STATES    | IN        | Activity bitmap (little-endian)                               |
+| 0x30 | GET_SYS_INFO      | OUT       | Query: 30 01 <infotype>                                       |
+| 0x90 | DEVICE_INFO       | IN        | Bus diagnostics response                                      |
+| 0x94 | DIAGNOSTICS       | OUT       | Start/stop bus device diagnostics                             |
+| 0x96 | DIAGNOSTICS_CMD   | OUT       | Force info report from bus device                             |
+| 0x50 | PG_OUTPUTS_STATES | IN        | PG output states                                              |
 
 ## Command Choreography (pcap-verified)
 
@@ -94,6 +94,7 @@ Proven (pcap-verified + hardware-tested):
 
 - TLV framing, heartbeat, enable device states, get sections, sysinfo queries
 - Section state push on external change (instant)
+- Section secondary state: bit 7 (0x80) of primary byte = ARMING (~30s exit delay observed)
 - Device activity bitmap (0xd8, little-endian)
 - Code encoding: "999" + 4-digit code (ASCII) - pcap-verified
 - MODIFY_SECTION section 2: arm=0xa1, disarm=0x91 - pcap-verified
@@ -110,7 +111,7 @@ Needs service window verification:
 
 - MODIFY bytes for sections 1 and 3 (formula: 0x9f+N arm, 0x8f+N disarm)
 - ARM_HOME/ARM_NIGHT command bytes (formula: 0xaf+section)
-- 0x51 flag byte for PENDING/ARMING/TRIGGERED states
+- 0x51 flag byte for PENDING/TRIGGERED states
 - Signal strength formula for 0xa8 responses (values change but % mapping unconfirmed)
 - GET_DEVICE_STATUS (0x0a) unauthenticated access
 

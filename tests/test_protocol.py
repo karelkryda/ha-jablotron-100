@@ -17,6 +17,7 @@ from custom_components.jablotron_local.protocol import (
     PacketType,
     ReportTooLongError,
     SectionPrimaryState,
+    SectionSecondaryState,
     SectionState,
     SysInfoType,
     SystemInfo,
@@ -310,9 +311,15 @@ class TestDecodeSections:
         )
         states = decode_sections(data)
         assert len(states) == 3
-        assert states[0] == SectionState(1, SectionPrimaryState.DISARMED, 0)
-        assert states[1] == SectionState(2, SectionPrimaryState.ARMED_FULL, 0)
-        assert states[2] == SectionState(3, SectionPrimaryState.DISARMED, 0)
+        assert states[0] == SectionState(
+            1, SectionPrimaryState.DISARMED, SectionSecondaryState.NORMAL, 0
+        )
+        assert states[1] == SectionState(
+            2, SectionPrimaryState.ARMED_FULL, SectionSecondaryState.NORMAL, 0
+        )
+        assert states[2] == SectionState(
+            3, SectionPrimaryState.DISARMED, SectionSecondaryState.NORMAL, 0
+        )
 
     def test_parse_all_disarmed(self):
         """
@@ -372,6 +379,61 @@ class TestDecodeSections:
     def test_short_data_does_not_crash(self):
         assert decode_sections(b"\x01") == []
         assert decode_sections(b"") == []
+
+    def test_arming_bit7_masked_to_armed_full(self):
+        """
+        During exit delay the panel sends 0x83 (0x80 | ARMED_FULL).
+        decode_sections must mask bit 7 and set secondary=ARMING.
+        """
+        data = bytes([0x83, 0x00]) + bytes([0x07, 0x00] * 15) + bytes([0x00, 0x94])
+        states = decode_sections(data)
+        assert len(states) == 1
+        assert states[0] == SectionState(
+            1, SectionPrimaryState.ARMED_FULL, SectionSecondaryState.ARMING, 0
+        )
+
+    def test_arming_bit7_masked_to_armed_partial(self):
+        """0x82 = 0x80 | ARMED_PARTIAL → arming towards partial."""
+        data = bytes([0x82, 0x00]) + bytes([0x07, 0x00] * 15) + bytes([0x00, 0x94])
+        states = decode_sections(data)
+        assert len(states) == 1
+        assert states[0] == SectionState(
+            1, SectionPrimaryState.ARMED_PARTIAL, SectionSecondaryState.ARMING, 0
+        )
+
+    def test_arming_mixed_with_normal(self):
+        """
+        Real capture: section 1 arming (0x83), section 2 disarmed (0x01),
+        section 3 armed (0x03).
+        """
+        data = bytes(
+            [
+                0x83,
+                0x00,  # sec 1: arming towards ARMED_FULL
+                0x01,
+                0x00,  # sec 2: DISARMED
+                0x03,
+                0x00,  # sec 3: ARMED_FULL
+            ]
+            + [0x07, 0x00] * 13
+            + [0x00, 0x90]
+        )
+        states = decode_sections(data)
+        assert len(states) == 3
+        assert states[0] == SectionState(
+            1, SectionPrimaryState.ARMED_FULL, SectionSecondaryState.ARMING, 0
+        )
+        assert states[1] == SectionState(
+            2, SectionPrimaryState.DISARMED, SectionSecondaryState.NORMAL, 0
+        )
+        assert states[2] == SectionState(
+            3, SectionPrimaryState.ARMED_FULL, SectionSecondaryState.NORMAL, 0
+        )
+
+    def test_arming_bit7_with_off_slot_skipped(self):
+        """0x87 = 0x80 | OFF (7) should still be skipped."""
+        data = bytes([0x87, 0x00]) + bytes([0x07, 0x00] * 15) + bytes([0x00, 0x94])
+        assert decode_sections(data) == []
 
 
 class TestDecodeDevicesStates:

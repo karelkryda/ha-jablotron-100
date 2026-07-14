@@ -8,6 +8,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 
 from custom_components.jablotron_local.alarm_control_panel import (
+    _SECONDARY_STATE_MAP,
     _STATE_MAP,
     JablotronAlarmPanel,
     async_setup_entry,
@@ -20,6 +21,7 @@ from custom_components.jablotron_local.coordinator import JablotronCoordinator
 from custom_components.jablotron_local.protocol import (
     ArmMode,
     SectionPrimaryState,
+    SectionSecondaryState,
     SectionState,
 )
 
@@ -31,9 +33,10 @@ from custom_components.jablotron_local.protocol import (
 def _make_section(
     number: int = 1,
     primary: SectionPrimaryState = SectionPrimaryState.DISARMED,
+    secondary: SectionSecondaryState = SectionSecondaryState.NORMAL,
 ) -> SectionState:
     """Create a SectionState for testing."""
-    return SectionState(number=number, primary=primary, flags=0)
+    return SectionState(number=number, primary=primary, secondary=secondary, flags=0)
 
 
 def _make_coordinator(
@@ -171,6 +174,52 @@ class TestStateMapping:
         for state in SectionPrimaryState:
             if state != SectionPrimaryState.OFF:
                 assert state in _STATE_MAP
+
+    async def test_secondary_state_map_complete(self):
+        """Verify _SECONDARY_STATE_MAP covers all non-NORMAL secondary states."""
+        for state in SectionSecondaryState:
+            if state != SectionSecondaryState.NORMAL:
+                assert state in _SECONDARY_STATE_MAP
+
+    async def test_arming_state_overrides_primary(self, hass: HomeAssistant):
+        """Secondary ARMING maps to HA ARMING regardless of primary."""
+        section = _make_section(
+            1, SectionPrimaryState.ARMED_FULL, SectionSecondaryState.ARMING
+        )
+        entity = _make_entity(hass, section=section)
+
+        assert entity.alarm_state == AlarmControlPanelState.ARMING
+
+    async def test_arming_partial_maps_to_arming(self, hass: HomeAssistant):
+        """Arming towards ARMED_PARTIAL also maps to HA ARMING."""
+        section = _make_section(
+            1, SectionPrimaryState.ARMED_PARTIAL, SectionSecondaryState.ARMING
+        )
+        entity = _make_entity(hass, section=section)
+
+        assert entity.alarm_state == AlarmControlPanelState.ARMING
+
+    async def test_arming_to_armed_transition(self, hass: HomeAssistant):
+        """Entity transitions from ARMING to ARMED_AWAY when exit delay expires."""
+        section = _make_section(
+            1, SectionPrimaryState.ARMED_FULL, SectionSecondaryState.ARMING
+        )
+        coordinator = _make_coordinator(hass, sections=[section])
+        entity = _make_entity(hass, section=section, coordinator=coordinator)
+
+        assert entity.alarm_state == AlarmControlPanelState.ARMING
+
+        # Exit delay expires - panel sends ARMED_FULL without ARMING
+        coordinator.data.sections = [
+            _make_section(
+                1, SectionPrimaryState.ARMED_FULL, SectionSecondaryState.NORMAL
+            ),
+        ]
+
+        with patch.object(entity, "async_write_ha_state"):
+            entity._handle_coordinator_update()
+
+        assert entity.alarm_state == AlarmControlPanelState.ARMED_AWAY
 
 
 # ---------------------------------------------------------------------------

@@ -205,7 +205,10 @@ class JablotronCoordinator(DataUpdateCoordinator[PanelState]):
                     changed = True
                     LOGGER.debug(
                         "Sections updated: %s",
-                        [(s.number, s.primary.name) for s in sections],
+                        [
+                            (s.number, s.primary.name, s.secondary.name)
+                            for s in sections
+                        ],
                     )
 
             elif packet.type == PacketType.DEVICES_STATES:
